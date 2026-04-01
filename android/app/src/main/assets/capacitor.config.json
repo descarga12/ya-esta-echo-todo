@@ -1,0 +1,9 @@
+{
+	"appId": "com.qrinventario.app",
+	"appName": "qr-inventario",
+	"webDir": "dist/spa",
+	"bundledWebRuntime": false,
+	"server": {
+		"androidScheme": "https"
+	}
+}
