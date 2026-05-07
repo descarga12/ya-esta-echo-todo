@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
+import { API_BASE_URL } from "./api-config";
 
 export interface User {
   id?: number;
@@ -17,6 +18,8 @@ interface AuthContextType {
   login: (username: string, password: string) => Promise<void>;
   logout: () => void;
   isAuthenticated: boolean;
+  canEdit: boolean;
+  isAdmin: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -31,7 +34,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         const token = localStorage.getItem("auth_token");
         if (token) {
-          const response = await fetch("/api/usuarios/me", {
+          const response = await fetch(`${API_BASE_URL}/api/usuarios/me`, {
             headers: { Authorization: `Bearer ${token}` },
           });
           if (response.ok) {
@@ -53,7 +56,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const login = async (username: string, password: string) => {
     try {
-      const response = await fetch("/api/usuarios/login", {
+      const response = await fetch(`${API_BASE_URL}/api/usuarios/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ username, password }),
@@ -77,6 +80,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setUser(null);
   };
 
+  const isAdmin = user?.rol === "admin";
+  const canEdit = user?.rol === "admin" || user?.rol === "registrar";
+
   return (
     <AuthContext.Provider
       value={{
@@ -85,6 +91,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         login,
         logout,
         isAuthenticated: !!user,
+        canEdit,
+        isAdmin,
       }}
     >
       {children}

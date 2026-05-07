@@ -1,6 +1,22 @@
 import { RequestHandler } from "express";
 import pool from "../lib/db";
 
+/**
+ * ============================================
+ * API DE COMPROBANTES (RUTAS EXISTENTES)
+ * ============================================
+ * 
+ * Este módulo proporciona endpoints para consultar
+ * comprobantes desde la tabla alm_comprobante.
+ * 
+ * Nota: Estos son endpoints de solo lectura para
+ * mantener compatibilidad con datos existentes.
+ */
+
+/**
+ * Obtiene todos los comprobantes activos.
+ * Endpoint: GET /api/comprobantes
+ */
 export const getComprobantes: RequestHandler = async (req, res) => {
   try {
     const connection = await pool.getConnection();
@@ -11,10 +27,16 @@ export const getComprobantes: RequestHandler = async (req, res) => {
     res.json(rows);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Error fetching receipts" });
+    res.status(500).json({ error: "Error al obtener comprobantes" });
   }
 };
 
+/**
+ * Obtiene un comprobante específico por su ID.
+ * Endpoint: GET /api/comprobantes/:id
+ * 
+ * @param id - ID del comprobante (id_compro)
+ */
 export const getComprobanteById: RequestHandler = async (req, res) => {
   try {
     const { id } = req.params;
@@ -25,12 +47,12 @@ export const getComprobanteById: RequestHandler = async (req, res) => {
     );
     connection.release();
     if ((rows as any[]).length === 0) {
-      res.status(404).json({ error: "Comprobante not found" });
+      res.status(404).json({ error: "Comprobante no encontrado" });
       return;
     }
     res.json((rows as any[])[0]);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: "Error fetching receipt" });
+    res.status(500).json({ error: "Error al obtener comprobante" });
   }
 };

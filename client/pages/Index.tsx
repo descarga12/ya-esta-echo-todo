@@ -14,11 +14,34 @@ import {
   DialogFooter,
   DialogDescription,
 } from "@/components/ui/dialog";
-import { generateSku } from "@/lib/utils";
-import { currentUser } from "@/lib/auth";
+import { useAuth } from "@/lib/auth-context";
 import { useBienes, Bien } from "@/hooks/use-bienes";
 import { useImageUpload } from "@/hooks/use-image-upload";
+import { generateUserBienesPDF } from "@/lib/pdf-utils";
+import { API_BASE_URL, getApiHeaders } from "../lib/api-config";
+import { 
+  Search, 
+  Plus, 
+  QrCode, 
+  Package, 
+  MapPin, 
+  User as UserIcon, 
+  Edit3,
+  Trash2,
+  LayoutGrid,
+  List as ListIcon,
+  Camera,
+  Upload,
+  AlertCircle,
+  Filter,
+  Building2,
+  FileText
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 
+/**
+ * Parsea el texto escaneado de un código QR.
+ */
 function parseQR(text: string): Partial<Bien> {
   try {
     const data = JSON.parse(text);
@@ -35,66 +58,64 @@ function parseQR(text: string): Partial<Bien> {
 
 export default function Index() {
   const { items, add, update, remove, loading, error } = useBienes();
-  const { uploadImage, isLoading: isUploading, error: uploadError } = useImageUpload();
+  const { user: currentUserSession, canEdit } = useAuth();
+  const { uploadImage, isLoading: isUploading } = useImageUpload();
+  
   const [query, setQuery] = useState("");
   const [scanError, setScanError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [selectedItemForQR, setSelectedItemForQR] = useState<Bien | null>(null);
   const [draft, setDraft] = useState<Partial<Bien> & { photoPreview?: string }>({ cantidad: 1 });
-
-  // Color de badge para info del registrador (teal o azul)
-  const [badgeColor, setBadgeColor] = useState<"teal" | "blue">(
-    () =>
-      (localStorage.getItem("registradorBadgeColor") as "teal" | "blue") ||
-      "teal",
-  );
-  useEffect(() => {
-    try {
-      localStorage.setItem("registradorBadgeColor", badgeColor);
-    } catch {}
-  }, [badgeColor]);
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
+  const [locations, setLocations] = useState<{ id: number; nombre_departamento: string }[]>([]);
+  const [badgeColor, setBadgeColor] = useState<"teal" | "blue">("blue");
 
   // Filtros
   const [filterUnidad, setFilterUnidad] = useState<string>("all");
   const [filterCargo, setFilterCargo] = useState<string>("all");
   const [filterUser, setFilterUser] = useState<string>("all");
-  const [infoOpen, setInfoOpen] = useState(false);
+  const [showFilters, setShowFilters] = useState(false);
+  const [reportUser, setReportUser] = useState<string>("all");
 
-  // Auto-generar SKU al abrir diálogo de agregado manual y cuando cambia el nombre
   useEffect(() => {
-    if (open) {
-      setDraft((d) => ({ ...d, sku: generateSku(d.nombre || "") }));
-    }
-  }, [open]);
+    fetch(`${API_BASE_URL}/api/bienes/ubicaciones`, {
+      headers: getApiHeaders()
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          setLocations(data);
+        } else {
+          console.error("Ubicaciones no es un array:", data);
+          setLocations([]);
+        }
+      })
+      .catch(err => {
+        console.error("Error cargando ubicaciones:", err);
+        setLocations([]);
+      });
+  }, []);
+
+  // Listas para filtros extraídas de los items
+  const unidadesList = useMemo(() => Array.from(new Set(items.map(it => it.registrado_unidad).filter(Boolean))), [items]);
+  const cargosList = useMemo(() => Array.from(new Set(items.map(it => it.registrado_cargo).filter(Boolean))), [items]);
+  const usuariosList = useMemo(() => Array.from(new Set(items.map(it => it.registrado_nombre).filter(Boolean))), [items]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
-
     return items.filter((it) => {
-      // búsqueda de texto
       const matchesQuery =
         !q ||
-        it.nombre?.toLowerCase().includes(q) ||
-        it.sku?.toLowerCase().includes(q) ||
+        (it.nombre || "").toLowerCase().includes(q) ||
+        (it.sku || "").toLowerCase().includes(q) ||
         (it.ubicacion || "").toLowerCase().includes(q);
+      
       if (!matchesQuery) return false;
-
-      // filtro de unidad
-      if (
-        filterUnidad !== "all" &&
-        (it.registrado_unidad || "") !== filterUnidad
-      )
-        return false;
-      // filtro de cargo
-      if (filterCargo !== "all" && (it.registrado_cargo || "") !== filterCargo)
-        return false;
-      // filtro de usuario
-      if (
-        filterUser !== "all" &&
-        (it.registrado_por || it.registrado_nombre || "") !== filterUser
-      )
-        return false;
-
+      
+      if (filterUnidad !== "all" && (it.registrado_unidad || "") !== filterUnidad) return false;
+      if (filterCargo !== "all" && (it.registrado_cargo || "") !== filterCargo) return false;
+      if (filterUser !== "all" && (it.registrado_nombre || "") !== filterUser) return false;
+      
       return true;
     });
   }, [items, query, filterUnidad, filterCargo, filterUser]);
@@ -102,7 +123,6 @@ export default function Index() {
   const onScan = (text: string) => {
     setScanError(null);
     const suggestion = parseQR(text);
-    // si el SKU existe, incremento rápido; sino abrir modal
     const existing = items.find((it) => it.sku === suggestion.sku);
     if (existing) {
       update(existing.id, {
@@ -117,538 +137,474 @@ export default function Index() {
 
   const submitDraft = async () => {
     const name = (draft.nombre || "").trim();
-    let sku = (draft.sku || "").trim();
-    const cantidad = Number(draft.cantidad || 0);
     if (!name) return;
 
-    // Asegurar que el SKU exista y sea único entre items actuales (ignorar self al editar)
-    const baseSku = sku || generateSku(name);
-    const existingSet = new Set(items.map((it) => it.sku));
-    if (draft.id) {
-      const self = items.find((it) => it.id === draft.id);
-      if (self && self.sku) existingSet.delete(self.sku);
-    }
-
-    let unique = baseSku;
-    let counter = 1;
-    while (existingSet.has(unique)) {
-      unique = `${baseSku}-${String(counter).padStart(2, "0")}`;
-      counter += 1;
-    }
-    sku = unique;
-
-    // Si se está editando item existente
-    if (draft.id) {
-      const id = draft.id as string;
-      const patch = {
-        nombre: name,
-        sku,
-        cantidad: isNaN(cantidad) ? 0 : cantidad,
-        ubicacion: draft.ubicacion || "",
-        foto: draft.foto || undefined,
-        qr_code: draft.qr_code || `${window.location.origin}/item/${id}`,
-      };
-      update(id, patch);
-      setOpen(false);
-      setDraft({ cantidad: 1 });
-      return;
-    }
-
-    // info de registrador del usuario actual si está disponible
-    const id = crypto.randomUUID();
-    const qr_code = draft.qr_code || `${window.location.origin}/item/${id}`;
-    const registrador = currentUser();
-
-    const newItem = {
-      id,
+    const payload: any = {
+      ...draft,
       nombre: name,
-      sku,
-      cantidad: isNaN(cantidad) ? 0 : cantidad,
-      ubicacion: draft.ubicacion || "",
-      qr_code,
-      foto: draft.foto,
-      registrado_por: registrador?.username,
-      registrado_nombre: registrador?.name,
-      registrado_unidad: registrador?.unidadOrganica,
-      registrado_cargo: registrador?.cargo,
+      registrado_por: draft.registrado_por || currentUserSession?.id?.toString(),
+      registrado_nombre: draft.registrado_nombre || currentUserSession?.nombre,
+      registrado_unidad: draft.registrado_unidad || currentUserSession?.unidad_organica,
+      registrado_cargo: draft.registrado_cargo || currentUserSession?.cargo,
     };
-    await add(newItem);
+
+    delete payload.photoPreview;
+
+    if (draft.id) {
+      await update(draft.id, payload);
+    } else {
+      await add(payload);
+    }
     setOpen(false);
     setDraft({ cantidad: 1 });
   };
 
+  const generateUserReport = () => {
+    if (reportUser === "all") return;
+    const userItems = items.filter(it => it.registrado_nombre === reportUser);
+    generateUserBienesPDF(reportUser, userItems);
+  };
+
   return (
-    <section className="space-y-8">
-      <div className="grid gap-6 md:grid-cols-2 items-start">
-        <div className="space-y-4">
-          <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight">
-            Inventario con QR
-          </h1>
-          <p className="text-muted-foreground">
-            Escanea códigos QR para agregar o actualizar artículos al instante.
-            También puedes buscar y editar manualmente.
-          </p>
-          <div className="flex gap-2">
-            <Dialog open={open} onOpenChange={(newOpen) => {
-              setOpen(newOpen);
-              if (!newOpen) {
-                // Limpiar preview al cerrar
-                setDraft((d) => {
-                  const { photoPreview, ...rest } = d as any;
-                  return rest;
-                });
-              }
-            }}>
-              <DialogTrigger asChild>
-                <Button>Agregar manualmente</Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>
-                    {draft?.id ? "Editar artículo" : "Nuevo artículo"}
-                  </DialogTitle>
-                  <DialogDescription>
-                    Completa los datos del artículo
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-4 py-2">
-                  <div className="grid gap-2">
-                    <Label htmlFor="sku">Código/SKU (automático)</Label>
-                    <Input id="sku" value={draft.sku || ""} readOnly />
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="name">Nombre</Label>
-                    <Input
-                      id="name"
-                      value={draft.nombre || ""}
-                      onChange={(e) =>
-                        setDraft((d) => {
-                          const nombre = e.target.value;
-                          return { ...d, nombre, sku: generateSku(nombre) };
-                        })
-                      }
-                    />
-                  </div>
-                  <div className="grid gap-2 md:grid-cols-2">
-                    <div className="grid gap-2">
-                      <Label htmlFor="qty">Cantidad</Label>
-                      <Input
-                        id="qty"
-                        type="number"
-                        min={0}
-                        value={draft.cantidad ?? 0}
-                        onChange={(e) =>
-                          setDraft((d) => ({
-                            ...d,
-                            cantidad: Number(e.target.value),
-                          }))
-                        }
+    <div className="space-y-8 pb-12 animate-in fade-in duration-500">
+      {/* Hero Section */}
+      <div className="relative overflow-hidden rounded-3xl bg-slate-900 border border-slate-800 p-8 shadow-2xl">
+        <div className="absolute top-0 right-0 w-64 h-64 bg-blue-500/10 blur-[80px] rounded-full -mr-20 -mt-20" />
+        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+          <div className="space-y-2">
+            <h1 className="text-3xl font-black text-white tracking-tight flex items-center gap-3">
+              <Package className="text-blue-500" />
+              Inventario de <span className="text-blue-500">Bienes</span>
+            </h1>
+            <p className="text-slate-400 font-medium">Gestiona y escanea tus activos en tiempo real</p>
+          </div>
+          
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="bg-slate-950/50 backdrop-blur border border-slate-800 rounded-2xl p-4 flex flex-col min-w-[120px]">
+              <span className="text-xs font-bold text-slate-500 uppercase tracking-widest text-center">Total Bienes</span>
+              <span className="text-2xl font-black text-white text-center">{items.length}</span>
+            </div>
+
+            {/* Selector de Reporte por Usuario */}
+            <div className="flex items-center gap-2 bg-slate-950/50 border border-slate-800 rounded-2xl p-2">
+              <select 
+                value={reportUser}
+                onChange={(e) => setReportUser(e.target.value)}
+                className="bg-transparent text-white text-sm border-none focus:ring-0 cursor-pointer max-w-[150px] outline-none"
+              >
+                <option value="all" className="bg-slate-900 text-white">Reporte por Usuario...</option>
+                {usuariosList.map(u => (
+                  <option key={u} value={u} className="bg-slate-900 text-white">{u}</option>
+                ))}
+              </select>
+              <Button 
+                onClick={generateUserReport}
+                disabled={reportUser === "all"}
+                size="sm"
+                className="bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 rounded-xl flex items-center gap-2"
+              >
+                <FileText className="w-4 h-4" />
+                PDF
+              </Button>
+            </div>
+
+            {canEdit && (
+              <Dialog open={open} onOpenChange={setOpen}>
+                <DialogTrigger asChild>
+                  <Button 
+                    onClick={() => setDraft({ cantidad: 1 })}
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-bold h-14 px-8 rounded-2xl shadow-lg shadow-blue-600/20 active:scale-95 transition-all"
+                  >
+                    <Plus className="mr-2 w-5 h-5" /> Nuevo Bien
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="bg-slate-900 border-slate-800 text-white rounded-3xl max-w-lg">
+                  <DialogHeader>
+                    <DialogTitle className="text-2xl font-black">
+                      {draft.id ? "Editar Bien" : "Nuevo Bien"}
+                    </DialogTitle>
+                    <DialogDescription className="text-slate-500">
+                      Completa la información del activo para el inventario
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="grid gap-6 py-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Nombre del Bien</Label>
+                      <Input 
+                        placeholder="Ej: Laptop Dell XPS 13"
+                        value={draft.nombre || ""} 
+                        onChange={(e) => setDraft({...draft, nombre: e.target.value})}
+                        className="bg-slate-950 border-slate-800 rounded-xl h-12"
                       />
                     </div>
-                    <div className="grid gap-2">
-                      <Label htmlFor="loc">Ubicación</Label>
-                      <Input
-                        id="loc"
-                        value={draft.ubicacion || ""}
-                        onChange={(e) =>
-                          setDraft((d) => ({ ...d, ubicacion: e.target.value }))
-                        }
-                      />
-                    </div>
-                  </div>
-
-                  <div className="grid gap-2">
-                    <Label>Foto del objeto</Label>
-                    <div className="flex items-center gap-2">
-                      <label className={`inline-flex items-center justify-center rounded-md border px-3 py-2 text-sm cursor-pointer hover:bg-accent/20 ${isUploading ? "opacity-50 cursor-not-allowed" : ""}`}>
-                        Tomar foto (cámara)
-                        <input
-                          type="file"
-                          accept="image/*"
-                          capture="environment"
-                          className="hidden"
-                          disabled={isUploading}
-                          onChange={async (e) => {
-                            const f = e.target.files?.[0];
-                            if (!f) return;
-                            
-                            // Mostrar preview mientras se sube
-                            const reader = new FileReader();
-                            reader.onload = () => {
-                              setDraft((d) => ({
-                                ...d,
-                                photoPreview: reader.result as string,
-                              }));
-                            };
-                            reader.readAsDataURL(f);
-                            
-                            // Subir al servidor
-                            const result = await uploadImage(f);
-                            if (result) {
-                              setDraft((d) => ({
-                                ...d,
-                                foto: result.url,
-                                photoPreview: result.url,
-                              }));
-                            }
-                          }}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Código / SKU</Label>
+                        <Input 
+                          value={draft.sku || ""} 
+                          onChange={(e) => setDraft({...draft, sku: e.target.value})}
+                          className="bg-slate-950 border-slate-800 rounded-xl h-12"
                         />
-                      </label>
-
-                      <label className={`inline-flex items-center justify-center rounded-md border px-3 py-2 text-sm cursor-pointer hover:bg-accent/20 ${isUploading ? "opacity-50 cursor-not-allowed" : ""}`}>
-                        Subir archivo
-                        <input
-                          type="file"
-                          accept="image/*"
-                          className="hidden"
-                          disabled={isUploading}
-                          onChange={async (e) => {
-                            const f = e.target.files?.[0];
-                            if (!f) return;
-                            
-                            // Mostrar preview mientras se sube
-                            const reader = new FileReader();
-                            reader.onload = () => {
-                              setDraft((d) => ({
-                                ...d,
-                                photoPreview: reader.result as string,
-                              }));
-                            };
-                            reader.readAsDataURL(f);
-                            
-                            // Subir al servidor
-                            const result = await uploadImage(f);
-                            if (result) {
-                              setDraft((d) => ({
-                                ...d,
-                                foto: result.url,
-                                photoPreview: result.url,
-                              }));
-                            }
-                          }}
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Stock Inicial</Label>
+                        <Input 
+                          type="number"
+                          min="0"
+                          value={draft.cantidad || 1} 
+                          onChange={(e) => setDraft({...draft, cantidad: parseInt(e.target.value) || 0})}
+                          className="bg-slate-950 border-slate-800 rounded-xl h-12 focus-visible:ring-blue-500/50"
                         />
-                      </label>
-
-                      <div className="ml-auto">
-                        {draft.photoPreview ? (
-                          <img
-                            src={draft.photoPreview}
-                            alt="preview"
-                            className="h-16 w-16 rounded-md object-cover border"
-                          />
-                        ) : (
-                          <div className="h-16 w-16 rounded-md border grid place-items-center text-xs text-muted-foreground">
-                            No hay foto
-                          </div>
-                        )}
                       </div>
                     </div>
-                    {uploadError && (
-                      <p className="text-xs text-destructive">{uploadError}</p>
-                    )}
-                    {isUploading && (
-                      <p className="text-xs text-muted-foreground">Subiendo...</p>
-                    )}
+                    <div className="space-y-2">
+                      <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Ubicación Institucional</Label>
+                      <select 
+                        value={draft.ubicacion || ""} 
+                        onChange={(e) => setDraft({...draft, ubicacion: e.target.value})}
+                        className="w-full bg-slate-950 border border-slate-800 rounded-xl h-12 px-4 text-sm focus:ring-1 focus:ring-blue-500/50 outline-none text-white"
+                      >
+                        <option value="" className="bg-slate-900">Seleccionar Ubicación...</option>
+                        {locations.map(loc => (
+                          <option key={loc.id} value={loc.nombre_departamento} className="bg-slate-900">{loc.nombre_departamento}</option>
+                        ))}
+                      </select>
+                    </div>
+                    
+                    <div className="space-y-3">
+                      <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Fotografía del Activo</Label>
+                      <div className="flex items-center gap-4">
+                        <div className="flex-1 grid grid-cols-2 gap-2">
+                          <Button 
+                            variant="outline" 
+                            type="button"
+                            className="bg-slate-950 border-slate-800 rounded-xl h-20 flex-col gap-2 hover:bg-slate-800 hover:border-blue-500/50 transition-all group"
+                            onClick={() => document.getElementById('camera-input')?.click()}
+                          >
+                            <Camera className="w-5 h-5 text-slate-500 group-hover:text-blue-500" />
+                            <span className="text-[10px] font-bold uppercase tracking-tighter">Cámara</span>
+                            <input id="camera-input" type="file" accept="image/*" capture="environment" className="hidden" onChange={async (e) => {
+                              const f = e.target.files?.[0];
+                              if (f) {
+                                setDraft(d => ({...d, photoPreview: URL.createObjectURL(f)}));
+                                const res = await uploadImage(f);
+                                if (res) setDraft(d => ({...d, foto: res.url}));
+                              }
+                            }} />
+                          </Button>
+                          <Button 
+                            variant="outline" 
+                            type="button"
+                            className="bg-slate-950 border-slate-800 rounded-xl h-20 flex-col gap-2 hover:bg-slate-800 hover:border-blue-500/50 transition-all group"
+                            onClick={() => document.getElementById('file-input')?.click()}
+                          >
+                            <Upload className="w-5 h-5 text-slate-500 group-hover:text-blue-500" />
+                            <span className="text-[10px] font-bold uppercase tracking-tighter">Subir</span>
+                            <input id="file-input" type="file" accept="image/*" className="hidden" onChange={async (e) => {
+                              const f = e.target.files?.[0];
+                              if (f) {
+                                setDraft(d => ({...d, photoPreview: URL.createObjectURL(f)}));
+                                const res = await uploadImage(f);
+                                if (res) setDraft(d => ({...d, foto: res.url}));
+                              }
+                            }} />
+                          </Button>
+                        </div>
+                        <div className="w-20 h-20 rounded-2xl bg-slate-950 border border-slate-800 overflow-hidden">
+                          {(draft.photoPreview || draft.foto) ? (
+                            <img src={draft.photoPreview || draft.foto} alt="Preview" className="w-full h-full object-cover" />
+                          ) : (
+                            <div className="w-full h-full flex items-center justify-center">
+                              <Package className="w-6 h-6 text-slate-800" />
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <DialogFooter>
-                  <Button onClick={submitDraft} disabled={isUploading || loading}>
-                    {isUploading || loading ? "Guardando..." : "Guardar"}
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+                  <DialogFooter className="pt-2">
+                    <Button 
+                      onClick={submitDraft}
+                      disabled={isUploading || loading}
+                      className="w-full bg-blue-600 hover:bg-blue-500 h-14 font-black rounded-2xl shadow-lg shadow-blue-600/20"
+                    >
+                      {draft.id ? "Actualizar Activo" : "Registrar Activo"}
+                    </Button>
+                  </DialogFooter>
+                </DialogContent>
+              </Dialog>
+            )}
           </div>
-        </div>
-
-        <div className="hidden md:block" />
-
-        <div className="text-xs text-muted-foreground mt-1">
-          Información: selecciona filtros para refinar resultados; pulsa "Info"
-          para más detalles.
-        </div>
-
-        <div className="">
-          <QRScanner
-            onResult={onScan}
-            onError={(e) => setScanError(e.message)}
-          />
-          {scanError && (
-            <p className="mt-2 text-xs text-destructive">{scanError}</p>
-          )}
         </div>
       </div>
 
-      <Card>
-        <CardHeader className="flex items-center justify-between gap-4 md:flex-row md:items-end">
-          <div className="w-full">
-            <CardTitle className="text-xl">Inventario ({items.length} bienes)</CardTitle>
-            {loading && <span className="text-xs text-muted-foreground">Cargando...</span>}
-            {error && <span className="text-xs text-destructive">{error}</span>}
+
+      {/* Search and Filters */}
+      <div className="space-y-4">
+        <div className="flex flex-col lg:flex-row gap-4 items-start lg:items-center">
+          <div className="relative w-full lg:flex-1 group">
+            <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none text-slate-500 group-focus-within:text-blue-500 transition-colors">
+              <Search size={20} />
+            </div>
+            <Input 
+              placeholder="Buscar por nombre, SKU o ubicación..."
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              className="bg-slate-900/50 border-slate-800 pl-12 h-14 rounded-2xl text-white placeholder:text-slate-600 focus-visible:ring-blue-500/50"
+            />
           </div>
-          <div className="w-full md:w-80">
-            <div className="relative">
-              <div className="absolute right-1 top-1/2 -translate-y-1/2 flex items-center gap-2 z-20">
-                <button
-                  type="button"
-                  aria-pressed={badgeColor === "teal"}
-                  onClick={() => setBadgeColor("teal")}
-                  className={`h-6 w-6 rounded-full flex items-center justify-center ${badgeColor === "teal" ? "ring-2 ring-offset-1 ring-teal-500" : ""} bg-teal-400`}
-                  title="Teal"
-                />
-                <button
-                  type="button"
-                  aria-pressed={badgeColor === "blue"}
-                  onClick={() => setBadgeColor("blue")}
-                  className={`h-6 w-6 rounded-full flex items-center justify-center ${badgeColor === "blue" ? "ring-2 ring-offset-1 ring-blue-500" : ""} bg-blue-400`}
-                  title="Blue"
-                />
-              </div>
+          
+          <div className="flex items-center gap-2 w-full lg:w-auto">
+            <Button 
+              variant="outline" 
+              onClick={() => setShowFilters(!showFilters)}
+              className={cn(
+                "h-14 px-5 rounded-2xl border-slate-800 bg-slate-900/50 text-slate-400 hover:text-white flex gap-2",
+                showFilters && "border-blue-500/50 text-blue-500 bg-blue-500/5"
+              )}
+            >
+              <Filter size={18} />
+              <span className="font-bold text-xs uppercase tracking-widest">Filtros</span>
+            </Button>
+            
+            <Button 
+              variant="outline" 
+              size="icon"
+              onClick={() => setViewMode(viewMode === "grid" ? "list" : "grid")}
+              className="h-14 w-14 rounded-2xl border-slate-800 bg-slate-900/50 text-slate-400 hover:text-white"
+            >
+              {viewMode === "grid" ? <ListIcon /> : <LayoutGrid />}
+            </Button>
+            
+            <div className="flex-1 lg:flex-none">
+              <QRScanner onResult={onScan} onError={(e) => setScanError(e.message)} />
+            </div>
+          </div>
+        </div>
 
-              <div className="p-2 bg-white/95 backdrop-blur-sm border border-gray-100 rounded-lg shadow-sm">
-                <div className="flex items-center gap-2 overflow-auto">
-                  <div className="w-64 min-w-[220px]">
-                    <Input
-                      className="rounded-full md:text-sm"
-                      placeholder="Buscar por nombre, código o ubicación..."
-                      value={query}
-                      onChange={(e) => setQuery(e.target.value)}
-                    />
-                  </div>
-
-                  <select
-                    value={filterUnidad}
-                    onChange={(e) => setFilterUnidad(e.target.value)}
-                    className="border rounded-full px-3 py-1.5 bg-white text-sm"
-                  >
-                    <option value="all">Todas las Unidades</option>
-                    {Array.from(
-                      new Set(items.map((it) => it.registrado_unidad).filter(Boolean)),
-                    ).map((u) => (
-                      <option key={u} value={u as string}>
-                        {u}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={filterCargo}
-                    onChange={(e) => setFilterCargo(e.target.value)}
-                    className="border rounded-full px-3 py-1.5 bg-white text-sm"
-                  >
-                    <option value="all">Todos los Cargos</option>
-                    {Array.from(
-                      new Set(items.map((it) => it.registrado_cargo).filter(Boolean)),
-                    ).map((c) => (
-                      <option key={c} value={c as string}>
-                        {c}
-                      </option>
-                    ))}
-                  </select>
-
-                  <select
-                    value={filterUser}
-                    onChange={(e) => setFilterUser(e.target.value)}
-                    className="border rounded-full px-3 py-1.5 bg-white text-sm"
-                  >
-                    <option value="all">Todos los Usuarios</option>
-                    {Array.from(
-                      new Set(
-                        items
-                          .map((it) => it.registrado_por || it.registrado_nombre)
-                          .filter(Boolean),
-                      ),
-                    ).map((u) => (
-                      <option key={u} value={u as string}>
-                        {u}
-                      </option>
-                    ))}
-                  </select>
-
-                  <div className="flex items-center gap-2">
-                    <Dialog open={infoOpen} onOpenChange={setInfoOpen}>
-                      <DialogTrigger asChild>
-                        <Button variant="outline" size="sm">
-                          Info
-                        </Button>
-                      </DialogTrigger>
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>Ayuda - Filtros</DialogTitle>
-                        </DialogHeader>
-                        <div className="text-sm text-muted-foreground">
-                          Usa los filtros para reducir la lista por Unidad orgánica,
-                          Cargo o Usuario. El buscador permite buscar por nombre, SKU o
-                          ubicación.
-                        </div>
-                        <DialogFooter>
-                          <Button onClick={() => setInfoOpen(false)}>Cerrar</Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
-
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setFilterUnidad("all");
-                        setFilterCargo("all");
-                        setFilterUser("all");
-                        setQuery("");
-                      }}
-                    >
-                      Limpiar
-                    </Button>
-                  </div>
+        {error && (
+        <div className="rounded-3xl border border-red-500/20 bg-red-500/10 p-6 text-red-200 space-y-3">
+          <div className="flex items-center gap-3">
+            <AlertCircle className="w-5 h-5 text-red-400" />
+            <p className="font-semibold">No se pudo cargar los bienes.</p>
+          </div>
+          <p className="text-sm text-red-100">{error}</p>
+          <p className="text-xs text-red-200">Verifica la conexión al servidor o los filtros activos.</p>
+        </div>
+      )}
+      {showFilters && (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 p-6 bg-slate-900/50 border border-slate-800 rounded-3xl animate-in slide-in-from-top-2 duration-300">
+            <div className="space-y-2">
+              <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Unidad Orgánica</Label>
+              <select 
+                value={filterUnidad}
+                onChange={(e) => setFilterUnidad(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 text-white h-11 rounded-xl px-4 text-sm focus:ring-1 focus:ring-blue-500/50 outline-none"
+              >
+                <option value="all">Todas las unidades</option>
+                {unidadesList.map(u => <option key={u} value={u}>{u}</option>)}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Cargo</Label>
+              <select 
+                value={filterCargo}
+                onChange={(e) => setFilterCargo(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 text-white h-11 rounded-xl px-4 text-sm focus:ring-1 focus:ring-blue-500/50 outline-none"
+              >
+                <option value="all">Todos los cargos</option>
+                {cargosList.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Registrador</Label>
+              <select 
+                value={filterUser}
+                onChange={(e) => setFilterUser(e.target.value)}
+                className="w-full bg-slate-950 border border-slate-800 text-white h-11 rounded-xl px-4 text-sm focus:ring-1 focus:ring-blue-500/50 outline-none"
+              >
+                <option value="all">Todos los usuarios</option>
+                {usuariosList.map(u => <option key={u} value={u}>{u}</option>)}
+              </select>
+            </div>
+            
+            <div className="md:col-span-3 pt-4 border-t border-slate-800/50 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Color de Etiquetas:</span>
+                <div className="flex gap-2">
+                  <button 
+                    onClick={() => setBadgeColor("teal")}
+                    className={cn(
+                      "w-6 h-6 rounded-full bg-teal-500 border-2 border-transparent transition-all",
+                      badgeColor === "teal" && "border-white scale-110 shadow-lg shadow-teal-500/50"
+                    )}
+                  />
+                  <button 
+                    onClick={() => setBadgeColor("blue")}
+                    className={cn(
+                      "w-6 h-6 rounded-full bg-blue-500 border-2 border-transparent transition-all",
+                      badgeColor === "blue" && "border-white scale-110 shadow-lg shadow-blue-500/50"
+                    )}
+                  />
                 </div>
               </div>
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={() => { setFilterUnidad("all"); setFilterCargo("all"); setFilterUser("all"); }}
+                className="text-xs font-bold text-slate-500 hover:text-white"
+              >
+                LIMPIAR FILTROS
+              </Button>
             </div>
           </div>
-        </CardHeader>
-        <CardContent>
-          {loading ? (
-            <div className="text-sm text-muted-foreground py-6">
-              Cargando bienes desde la base de datos...
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="text-sm text-muted-foreground py-6">
-              No hay artículos. Escanea un QR o agrega uno manualmente.
-            </div>
-          ) : (
-            <ul className="divide-y">
-              {filtered.map((it) => (
-                <li
-                  key={it.id}
-                  className="py-3 grid grid-cols-1 md:grid-cols-[1fr_240px_auto] md:items-center gap-2"
-                >
-                  <div className="min-w-0">
-                    <p className="font-medium truncate">
-                      <a
-                        href={`/item/${it.id}`}
-                        className="font-semibold hover:underline"
-                      >
-                        {it.nombre}
-                      </a>
-                      <span className="text-muted-foreground font-normal">
-                        • {it.sku}
-                      </span>
-                    </p>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {it.ubicacion
-                        ? `Ubicación: ${it.ubicacion}`
-                        : "Sin ubicación"}
-                    </p>
-                  </div>
+        )}
+      </div>
 
-                  <div className="flex justify-center">
-                    <div className="text-center">
-                      <div
-                        className={`inline-flex items-center justify-center gap-2 px-2 py-0.5 rounded-md text-xs font-semibold ${badgeColor === "teal" ? "bg-teal-100 text-teal-800" : "bg-blue-100 text-blue-800"}`}
-                      >
-                        <svg
-                          className="h-4 w-4"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
+      {/* Main Grid */}
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+          {[1,2,3,4,5,6,7,8].map(i => (
+            <div key={i} className="h-64 bg-slate-900/50 border border-slate-800 rounded-3xl animate-pulse" />
+          ))}
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 bg-slate-900/30 border border-dashed border-slate-800 rounded-3xl space-y-4">
+          <AlertCircle className="w-12 h-12 text-slate-700" />
+          <p className="text-slate-500 font-medium">No se encontraron bienes.</p>
+          <p className="text-sm text-slate-400 text-center max-w-md">
+            Revisa que no tengas filtros activos, borra la búsqueda o comprueba que el servidor esté conectado.
+          </p>
+        </div>
+      ) : (
+        <div className={cn(
+          "grid gap-6",
+          viewMode === "grid" ? "grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4" : "grid-cols-1"
+        )}>
+          {filtered.map((item) => (
+            <Card key={item.id} className="group bg-slate-900/50 border-slate-800 hover:border-blue-500/50 rounded-3xl overflow-hidden transition-all duration-300 hover:shadow-2xl hover:shadow-blue-500/10">
+              {item.foto && (
+                <div className="h-40 w-full overflow-hidden border-b border-slate-800">
+                  <img 
+                    src={item.foto} 
+                    alt={item.nombre} 
+                    className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
+                  />
+                </div>
+              )}
+              <CardHeader className="p-6 pb-2 relative">
+                <div className="flex justify-between items-start mb-4">
+                  <div className="p-3 rounded-2xl bg-blue-500/10 text-blue-500">
+                    <Package size={24} />
+                  </div>
+                  <div className="flex gap-1">
+                    {canEdit && (
+                      <>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => { setDraft(item); setOpen(true); }}
+                          className="h-9 w-9 rounded-xl text-slate-500 hover:text-white hover:bg-slate-800"
                         >
-                          <circle cx="12" cy="12" r="3" />
-                        </svg>
-                        <span>{it.registrado_unidad || "-"}</span>
+                          <Edit3 size={18} />
+                        </Button>
+                        <Button 
+                          variant="ghost" 
+                          size="icon" 
+                          onClick={() => {
+                            if (confirm(`¿Eliminar "${item.nombre}"?`)) remove(item.id);
+                          }}
+                          className="h-9 w-9 rounded-xl text-slate-500 hover:text-red-500 hover:bg-red-500/10"
+                        >
+                          <Trash2 size={18} />
+                        </Button>
+                      </>
+                    )}
+                  </div>
+                </div>
+                <CardTitle className="text-xl font-bold text-white group-hover:text-blue-400 transition-colors line-clamp-1">
+                  {item.nombre}
+                </CardTitle>
+                <p className="text-xs font-mono text-slate-500 tracking-tighter mt-1">{item.sku}</p>
+              </CardHeader>
+              
+              <CardContent className="p-6 pt-4 space-y-6">
+                <div className="flex items-center justify-between">
+                  <div className="space-y-1">
+                    <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest">Stock Disponible</p>
+                    <p className="text-2xl font-black text-white">{item.cantidad}</p>
+                  </div>
+                  <Button 
+                    variant="outline"
+                    size="icon"
+                    onClick={() => setSelectedItemForQR(item)}
+                    className="h-12 w-12 rounded-xl border-slate-800 bg-slate-950 text-blue-500 hover:bg-blue-500 hover:text-white transition-all shadow-inner"
+                  >
+                    <QrCode size={20} />
+                  </Button>
+                </div>
+
+                <div className="space-y-3 pt-4 border-t border-slate-800/50">
+                  <div className="flex items-center gap-3 text-slate-400">
+                    <MapPin size={16} className="text-slate-600" />
+                    <span className="text-sm font-medium truncate">{item.ubicacion || "Sin ubicación"}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <div className={cn(
+                      "flex flex-col gap-0.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest w-full",
+                      badgeColor === "teal" ? "bg-teal-500/10 text-teal-500 border border-teal-500/20" : "bg-blue-500/10 text-blue-500 border border-blue-500/20"
+                    )}>
+                      <div className="flex items-center gap-2">
+                        <UserIcon size={12} />
+                        <span className="truncate">{item.registrado_nombre || "Usuario"}</span>
                       </div>
-                      <div className="mt-1 flex items-center justify-center gap-2">
-                        <div
-                          className={`inline-block px-2 py-0.5 rounded-md text-xs ${badgeColor === "teal" ? "bg-teal-50 text-teal-700" : "bg-blue-50 text-blue-700"}`}
-                        >
-                          {it.registrado_nombre || it.registrado_por || "-"}
+                      {item.registrado_unidad && (
+                        <div className="flex items-center gap-2 opacity-70 mt-1">
+                          <Building2 size={10} />
+                          <span className="truncate font-medium">{item.registrado_unidad}</span>
                         </div>
-                        {it.registrado_cargo ? (
-                          <div
-                            className={`inline-block px-2 py-0.5 rounded-md text-xs ${badgeColor === "teal" ? "bg-teal-50 text-teal-700" : "bg-blue-50 text-blue-700"}`}
-                          >
-                            {it.registrado_cargo}
-                          </div>
-                        ) : null}
-                      </div>
+                      )}
                     </div>
                   </div>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
 
-                  <div className="flex items-center gap-2 justify-end">
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => {
-                        setDraft(it);
-                        setOpen(true);
-                      }}
-                    >
-                      Editar
-                    </Button>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      onClick={() =>
-                        update(it.id, {
-                          cantidad: Math.max(0, (it.cantidad || 0) - 1),
-                        })
-                      }
-                    >
-                      -1
-                    </Button>
-                    <span className="w-14 text-center text-sm font-semibold tabular-nums">
-                      {it.cantidad || 0}
-                    </span>
-                    <Button
-                      size="sm"
-                      onClick={() =>
-                        update(it.id, { cantidad: (it.cantidad || 0) + 1 })
-                      }
-                    >
-                      +1
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setSelectedItemForQR(it)}
-                    >
-                      Ver QR
-                    </Button>
-                    <Button
-                      variant="destructive"
-                      size="sm"
-                      onClick={() => remove(it.id)}
-                    >
-                      Eliminar
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* QR Modal */}
-      <Dialog open={!!selectedItemForQR} onOpenChange={(isOpen) => {
-        if (!isOpen) setSelectedItemForQR(null);
-      }}>
-        <DialogContent>
+      {/* QR Viewer Dialog */}
+      <Dialog open={!!selectedItemForQR} onOpenChange={() => setSelectedItemForQR(null)}>
+        <DialogContent className="bg-slate-900 border-slate-800 text-white rounded-3xl max-w-sm">
           <DialogHeader>
-            <DialogTitle>Código QR - {selectedItemForQR?.nombre}</DialogTitle>
-            <DialogDescription>
-              SKU: {selectedItemForQR?.sku}
+            <DialogTitle className="text-center font-black text-xl">Código QR del Activo</DialogTitle>
+            <DialogDescription className="text-center text-slate-500">
+              Usa este código para identificar el bien rápidamente
             </DialogDescription>
           </DialogHeader>
-          <div className="flex justify-center">
-            {selectedItemForQR && (
-              <QRCodeGenerator 
-                value={`${window.location.origin}/item/${selectedItemForQR.id}`}
-                size="lg"
-              />
-            )}
+          <div className="flex flex-col items-center justify-center p-8 space-y-6">
+            <div className="p-6 bg-white rounded-3xl shadow-2xl">
+              {selectedItemForQR && (
+                <QRCodeGenerator 
+                  value={selectedItemForQR.qr_code || selectedItemForQR.sku} 
+                  size="sm"
+                />
+              )}
+            </div>
+            <div className="text-center">
+              <p className="font-bold text-lg text-white">{selectedItemForQR?.nombre}</p>
+              <p className="text-xs font-mono text-slate-500 uppercase tracking-wider mt-1">{selectedItemForQR?.sku}</p>
+            </div>
           </div>
+          <Button 
+            variant="secondary" 
+            onClick={() => setSelectedItemForQR(null)}
+            className="w-full h-14 rounded-2xl font-bold bg-slate-900 hover:bg-slate-800 border-slate-800"
+          >
+            Cerrar Vista
+          </Button>
         </DialogContent>
       </Dialog>
-    </section>
+    </div>
   );
 }

@@ -5,6 +5,8 @@ import path from "path";
 import { handleDemo } from "./routes/demo";
 import { getCategorias, getCategoriaById } from "./routes/categorias";
 import { getComprobantes, getComprobanteById } from "./routes/comprobantes";
+import { getProductos, getProductoById, createProducto, updateProducto, deleteProducto } from "./routes/productos";
+import { handleGlobalSearch } from "./routes/search";
 import {
   getDetalleIngreso,
   getDetalleIngresoByIngreso,
@@ -16,7 +18,10 @@ import {
   createBien,
   updateBien,
   deleteBien,
-} from "./routes/bienes";
+  getUbicaciones,
+  getStats,
+  getBajas,
+} from "./routes/bienes-pat";
 import {
   listUsuarios,
   getUsuario,
@@ -25,13 +30,46 @@ import {
   deleteUsuario,
   loginUsuario,
   getCurrentUser,
-} from "./routes/usuarios";
+} from "./routes/usuarios-pat-fixed";
 
+/**
+ * Construye la app Express con:
+ * - middlewares globales (CORS, body parser, estáticos)
+ * - rutas API
+ * - fallback SPA para React Router
+ */
 export function createServer() {
   const app = express();
 
-  // Middleware
-  app.use(cors());
+  // CORS
+  // Nota: 'cors' NO soporta wildcards tipo "https://*.ngrok-free.dev" en arrays.
+  // Usamos una función para permitir ngrok + localhost + capacitor.
+  app.use(cors({
+    origin: (origin, cb) => {
+      if (!origin) return cb(null, true); // curl / apps nativas
+
+      const isLocal =
+        origin.startsWith("http://localhost") ||
+        origin.startsWith("http://127.0.0.1") ||
+        origin.startsWith("http://10.") ||
+        origin.startsWith("http://192.168.") ||
+        origin.startsWith("http://172.16.") ||
+        origin.startsWith("http://172.17.") ||
+        origin.startsWith("http://172.18.") ||
+        origin.startsWith("http://172.19.") ||
+        origin.startsWith("http://172.2") ||
+        origin.startsWith("http://172.3");
+
+      const isCapacitor = origin.startsWith("capacitor://localhost") || origin.startsWith("ionic://localhost");
+      const isNgrok = origin.includes(".ngrok-free.app") || origin.includes(".ngrok-free.dev") || origin.includes(".ngrok.io");
+
+      if (isLocal || isCapacitor || isNgrok) return cb(null, true);
+      return cb(null, false);
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "ngrok-skip-browser-warning"],
+    credentials: true,
+  }));
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
   app.use(express.static(path.join(process.cwd(), "public")));
@@ -62,6 +100,9 @@ export function createServer() {
 
   app.get("/api/demo", handleDemo);
 
+  // Global search
+  app.get("/api/search", handleGlobalSearch);
+
   // Database routes - Categorías
   app.get("/api/categorias", getCategorias);
   app.get("/api/categorias/:id", getCategoriaById);
@@ -70,6 +111,13 @@ export function createServer() {
   app.get("/api/comprobantes", getComprobantes);
   app.get("/api/comprobantes/:id", getComprobanteById);
 
+  // Database routes - Productos
+  app.get("/api/productos", getProductos);
+  app.get("/api/productos/:id", getProductoById);
+  app.post("/api/productos", createProducto);
+  app.put("/api/productos/:id", updateProducto);
+  app.delete("/api/productos/:id", deleteProducto);
+
   // Database routes - Detalle Ingreso
   app.get("/api/ingreso", getDetalleIngreso);
   app.get("/api/ingreso/:idingreso", getDetalleIngresoByIngreso);
@@ -77,14 +125,17 @@ export function createServer() {
   // Upload route
   app.post("/api/upload", handleUpload);
 
-  // Database routes - Bienes
+  // Database routes - Bienes (tablas PAT reales)
+  app.get("/api/bienes/ubicaciones", getUbicaciones);
+  app.get("/api/bienes/stats", getStats);
+  app.get("/api/bienes/bajas", getBajas); // Bienes dados de baja
   app.get("/api/bienes", getBienes);
   app.get("/api/bienes/:id", getBienById);
   app.post("/api/bienes", createBien);
   app.put("/api/bienes/:id", updateBien);
   app.delete("/api/bienes/:id", deleteBien);
 
-  // Database routes - Usuarios
+  // Database routes - Usuarios (tablas PAT reales)
   app.post("/api/usuarios/login", loginUsuario);
   app.get("/api/usuarios/me", getCurrentUser);
   app.get("/api/usuarios", listUsuarios);

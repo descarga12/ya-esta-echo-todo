@@ -1,6 +1,10 @@
 import { RequestHandler } from "express";
 import pool from "../lib/db";
 
+/**
+ * Rutas de solo lectura para categorías de almacén.
+ * Se consultan desde la tabla `alm_categoria`.
+ */
 export const getCategorias: RequestHandler = async (req, res) => {
   try {
     const connection = await pool.getConnection();
@@ -15,6 +19,9 @@ export const getCategorias: RequestHandler = async (req, res) => {
   }
 };
 
+/**
+ * Obtiene una categoría puntual por su ID lógico (`idcategoria`).
+ */
 export const getCategoriaById: RequestHandler = async (req, res) => {
   try {
     const { id } = req.params;

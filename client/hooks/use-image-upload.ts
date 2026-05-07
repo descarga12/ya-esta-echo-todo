@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { API_BASE_URL } from "../lib/api-config";
 
 export interface UploadResponse {
   success: boolean;
@@ -20,7 +21,7 @@ export function useImageUpload() {
       const formData = new FormData();
       formData.append("file", file);
 
-      const response = await fetch("/api/upload", {
+      const response = await fetch(`${API_BASE_URL}/api/upload`, {
         method: "POST",
         body: formData,
       });

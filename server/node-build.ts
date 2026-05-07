@@ -2,8 +2,13 @@ import path from "path";
 import { createServer } from "./index";
 import express from "express";
 
+// Punto de entrada de producción:
+// - monta el servidor API (createServer)
+// - sirve los assets estáticos del build SPA
+// - resuelve rutas de React Router hacia index.html
 const app = createServer();
-const port = process.env.PORT || 3000;
+const port = Number(process.env.PORT || 3000);
+const host = "0.0.0.0";
 
 // In production, serve the built SPA files
 const __dirname = import.meta.dirname;
@@ -22,8 +27,8 @@ app.all(/.*/, (req, res) => {
   res.sendFile(path.join(distPath, "index.html"));
 });
 
-app.listen(port, () => {
-  console.log(`🚀 Fusion Starter server running on port ${port}`);
+app.listen(port, host, () => {
+  console.log(`🚀 Fusion Starter server running on ${host}:${port}`);
   console.log(`📱 Frontend: http://localhost:${port}`);
   console.log(`🔧 API: http://localhost:${port}/api`);
 });

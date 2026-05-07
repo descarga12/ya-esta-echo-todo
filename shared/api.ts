@@ -7,6 +7,14 @@
 /**
  * Example response type for /api/demo
  */
-export interface DemoResponse {
-  message: string;
+export interface SearchResult {
+  table: string;
+  id: string | number;
+  title: string;
+  subtitle?: string;
+  type: string;
+}
+
+export interface SearchResponse {
+  results: SearchResult[];
 }

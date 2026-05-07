@@ -1,0 +1,6 @@
+<resources>
+    <string name="app_name">QR Inventario</string>
+    <string name="title_activity_main">QR Inventario</string>
+    <string name="package_name">com.qrinventario.app</string>
+    <string name="custom_url_scheme">com.qrinventario.app</string>
+</resources>

@@ -1,9 +1,9 @@
 {
 	"appId": "com.qrinventario.app",
-	"appName": "qr-inventario",
+	"appName": "SBH Huancayo",
 	"webDir": "dist/spa",
-	"bundledWebRuntime": false,
 	"server": {
-		"androidScheme": "https"
-	}
+		"androidScheme": "http"
+	},
+	"android": {}
 }

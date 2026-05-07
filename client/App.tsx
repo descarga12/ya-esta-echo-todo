@@ -14,6 +14,7 @@ import Item from "@/pages/Item";
 import Login from "@/pages/Login";
 import Users from "@/pages/Users";
 import Account from "@/pages/Account";
+import Almacen from "@/pages/Almacen";
 import { AuthProvider } from "@/lib/auth-context";
 import { ProtectedRoute } from "@/lib/ProtectedRoute";
 
@@ -42,6 +43,7 @@ const App = () => (
             >
               <Route index element={<Index />} />
               <Route path="reportes" element={<Reportes />} />
+              <Route path="almacen" element={<Almacen />} />
               <Route path="item/:id" element={<Item />} />
               <Route path="users" element={<Users />} />
               <Route path="account" element={<Account />} />

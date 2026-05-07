@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
+import { API_BASE_URL, getApiHeaders } from "../lib/api-config";
 
 export interface Bien {
   id: string;
@@ -39,7 +40,9 @@ export function useBienes() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/bienes");
+      const res = await fetch(`${API_BASE_URL}/api/bienes`, {
+        headers: getApiHeaders()
+      });
       if (!res.ok) throw new Error("Error al cargar bienes");
       const data = await res.json();
       setItems(data);
@@ -57,9 +60,12 @@ export function useBienes() {
   const add = async (item: BienInput) => {
     setError(null);
     try {
-      const res = await fetch("/api/bienes", {
+      const res = await fetch(`${API_BASE_URL}/api/bienes`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          ...getApiHeaders(),
+          "Content-Type": "application/json" 
+        },
         body: JSON.stringify(item),
       });
       if (!res.ok) {
@@ -77,9 +83,12 @@ export function useBienes() {
   const update = async (id: string, patch: Partial<BienInput>) => {
     setError(null);
     try {
-      const res = await fetch(`/api/bienes/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/bienes/${id}`, {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
+        headers: { 
+          ...getApiHeaders(),
+          "Content-Type": "application/json" 
+        },
         body: JSON.stringify(patch),
       });
       if (!res.ok) {
@@ -97,8 +106,9 @@ export function useBienes() {
   const remove = async (id: string) => {
     setError(null);
     try {
-      const res = await fetch(`/api/bienes/${id}`, {
+      const res = await fetch(`${API_BASE_URL}/api/bienes/${id}`, {
         method: "DELETE",
+        headers: getApiHeaders()
       });
       if (!res.ok) {
         const err = await res.json();

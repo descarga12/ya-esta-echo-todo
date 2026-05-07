@@ -26,3 +26,8 @@ dist-ssr
 .config/
 !.env
 .env
+
+# Android / Gradle generated
+android/.gradle/
+android/**/build/
+*.apk

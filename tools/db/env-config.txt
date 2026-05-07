@@ -1,0 +1,8 @@
+# CONFIGURACION DE BASE DE DATOS - Copiar a .env
+# Basado en HeidiSQL: 127.0.0.1:3306, root, sin password
+
+DB_HOST=127.0.0.1
+DB_PORT=3306
+DB_USER=root
+DB_PASS=
+DB_NAME=prueba

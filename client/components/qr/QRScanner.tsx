@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Html5Qrcode } from "html5-qrcode";
 import { Button } from "@/components/ui/button";
+import { isCapacitorNative, scanBarcodeNative } from "@/lib/native";
 
 export interface QRScannerProps {
   onResult: (text: string) => void;
@@ -13,6 +14,11 @@ export default function QRScanner({ onResult, onError, autoStart }: QRScannerPro
   const [active, setActive] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [isNative, setIsNative] = useState(false);
+
+  useEffect(() => {
+    isCapacitorNative().then(setIsNative).catch(() => setIsNative(false));
+  }, []);
 
   const stop = useCallback(() => {
     if (readerRef.current) {
@@ -31,7 +37,19 @@ export default function QRScanner({ onResult, onError, autoStart }: QRScannerPro
     try {
       setLoading(true);
       setError(null);
-      
+
+      if (isNative) {
+        const value = await scanBarcodeNative();
+        if (value) {
+          onResult(value);
+        } else {
+          const errorMsg = "No se detectó ningún código QR";
+          setError(errorMsg);
+          onError?.(new Error(errorMsg));
+        }
+        return;
+      }
+
       if (!readerRef.current) {
         readerRef.current = new Html5Qrcode("qr-reader");
       }
@@ -63,7 +81,7 @@ export default function QRScanner({ onResult, onError, autoStart }: QRScannerPro
     } finally {
       setLoading(false);
     }
-  }, [onResult, onError, stop]);
+  }, [isNative, onResult, onError, stop]);
 
   useEffect(() => {
     if (autoStart) start();
@@ -96,7 +114,7 @@ export default function QRScanner({ onResult, onError, autoStart }: QRScannerPro
 
   return (
     <div className="w-full">
-      {!active ? (
+      {!active || isNative ? (
         <Button 
           onClick={start} 
           disabled={loading}
