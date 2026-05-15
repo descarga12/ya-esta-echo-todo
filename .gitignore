@@ -31,3 +31,9 @@ dist-ssr
 android/.gradle/
 android/**/build/
 *.apk
+
+# User uploads (generated at runtime; keep folder via .gitkeep)
+public/uploads/*
+!public/uploads/.gitkeep
+android/app/src/main/assets/public/uploads/*
+!android/app/src/main/assets/public/uploads/.gitkeep

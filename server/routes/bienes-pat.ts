@@ -13,6 +13,52 @@
 import { RequestHandler } from "express";
 import pool from "../lib/db";
 
+/** Columnas de una tabla (para armar SQL dinámico de pat_usu). */
+async function getTableColumns(connection: any, tableName: string): Promise<string[]> {
+  const [columns] = await connection.query(`DESCRIBE ${tableName}`);
+  return (columns as any[]).map((c: any) => c.Field);
+}
+
+function qualTableCol(alias: string, col: string) {
+  return `\`${alias}\`.\`${col}\``;
+}
+
+/**
+ * Expresión SQL: quién registró el bien (nombre completo, login o ID).
+ * Evita filas vacías cuando solo existe usuario o nombres en columnas distintas.
+ */
+function buildRegistradoNombreSql(patUsuCols: string[], uAlias = "u"): string {
+  const lower = patUsuCols.map((c) => c.toLowerCase());
+  const findFirst = (candidates: string[]) => {
+    for (const cand of candidates) {
+      const i = lower.indexOf(cand.toLowerCase());
+      if (i >= 0) return patUsuCols[i];
+      const p = patUsuCols.find((c) => c.toLowerCase().includes(cand.toLowerCase()));
+      if (p) return p;
+    }
+    return undefined;
+  };
+  const nomCol = findFirst(["nombres", "nombre"]);
+  const apeCol = findFirst(["apellidos", "apellido", "ape"]);
+  const loginCol = findFirst(["nom_usu", "usuario", "username", "login", "nrodoc", "dni"]);
+
+  const pieces: string[] = [];
+  if (nomCol && apeCol) {
+    pieces.push(
+      `NULLIF(TRIM(CONCAT_WS(' ', ${qualTableCol(uAlias, nomCol)}, ${qualTableCol(uAlias, apeCol)})), '')`
+    );
+  } else if (nomCol) {
+    pieces.push(`NULLIF(TRIM(${qualTableCol(uAlias, nomCol)}), '')`);
+  }
+  if (loginCol) {
+    pieces.push(`NULLIF(TRIM(CAST(${qualTableCol(uAlias, loginCol)} AS CHAR(255))), '')`);
+  }
+
+  const fallback = `CASE WHEN p.idpatusu IS NOT NULL THEN CONCAT('Usuario (ID ', p.idpatusu, ')') ELSE 'Sin registrar' END`;
+  if (pieces.length === 0) return fallback;
+  return `COALESCE(${pieces.join(", ")}, ${fallback})`;
+}
+
 /**
  * OBTENER TODOS LOS BIENES
  * Tabla: pat_bien
@@ -23,6 +69,9 @@ export const getBienes: RequestHandler = async (req, res) => {
     const { unidad, rol } = req.query;
     const connection = await pool.getConnection();
 
+    const patUsuCols = await getTableColumns(connection, "pat_usu");
+    const registradoNombreSql = buildRegistradoNombreSql(patUsuCols);
+
     // Mapear campos de pat_bien al formato que espera el frontend
     let query = `SELECT 
       p.codbien as id,
@@ -31,7 +80,7 @@ export const getBienes: RequestHandler = async (req, res) => {
       COALESCE(p.cant, 1) as cantidad,
       p.ubicacion,
       uo.nombre as registrado_unidad,
-      CONCAT_WS(' ', u.nombres, u.apellidos) as registrado_nombre,
+      ${registradoNombreSql} as registrado_nombre,
       p.idpatusu as registrado_por,
       u.tipotra as registrado_cargo,
       p.estadobien as cod_estado,
@@ -88,7 +137,10 @@ export const getBienById: RequestHandler = async (req, res) => {
   try {
     const { id } = req.params;
     const connection = await pool.getConnection();
-    
+
+    const patUsuCols = await getTableColumns(connection, "pat_usu");
+    const registradoNombreSql = buildRegistradoNombreSql(patUsuCols);
+
     const [rows] = await connection.query(
       `SELECT 
         p.codbien as id,
@@ -97,7 +149,7 @@ export const getBienById: RequestHandler = async (req, res) => {
         COALESCE(p.cant, 1) as cantidad,
         p.ubicacion,
         uo.nombre as registrado_unidad,
-        CONCAT_WS(' ', u.nombres, u.apellidos) as registrado_nombre,
+        ${registradoNombreSql} as registrado_nombre,
         p.idpatusu as registrado_por,
         u.tipotra as registrado_cargo,
         p.estadobien as cod_estado,
@@ -132,27 +184,69 @@ export const getBienById: RequestHandler = async (req, res) => {
 export const getStats: RequestHandler = async (req, res) => {
   try {
     const connection = await pool.getConnection();
-    
-    // Total de bienes
-    const [totalResult] = await connection.query(
-      "SELECT COUNT(*) as total FROM pat_bien"
+
+    const [[totals]] = await connection.query<any[]>(
+      `SELECT 
+        COUNT(*) AS total,
+        COALESCE(SUM(COALESCE(cant, 1)), 0) AS stockTotal,
+        (SELECT COUNT(DISTINCT iduniorga) FROM pat_bien pb2 WHERE pb2.iduniorga IS NOT NULL) AS oficinasActivas
+       FROM pat_bien`
     );
-    
-    // Bienes por unidad (usando iduniorga que es el código de unidad en pat_bien)
-    const [porUnidad] = await connection.query(
-      `SELECT pb.iduniorga as unidad_codigo, COUNT(*) as cantidad 
+
+    const [topOficinas] = await connection.query(
+      `SELECT 
+        COALESCE(MAX(uo.nombre), CONCAT('Unidad ', pb.iduniorga)) AS name,
+        COUNT(*) AS value
+       FROM pat_bien pb
+       LEFT JOIN tes_unidad_organica uo ON uo.id = pb.iduniorga
+       WHERE pb.iduniorga IS NOT NULL
+       GROUP BY pb.iduniorga
+       ORDER BY value DESC
+       LIMIT 5`
+    );
+
+    const [legacyPorUnidad] = await connection.query(
+      `SELECT pb.iduniorga AS unidad_codigo, COUNT(*) AS cantidad 
        FROM pat_bien pb
        WHERE pb.iduniorga IS NOT NULL
        GROUP BY pb.iduniorga`
     );
-    
+
+    let byMonth: { month: string; total: number }[] = [];
+    try {
+      const [cols] = await connection.query("SHOW COLUMNS FROM pat_bien");
+      const colNames = (cols as { Field: string }[]).map((c) => c.Field);
+      const fechaCol = colNames.find(
+        (f) =>
+          f.toLowerCase().includes("fec") ||
+          f.toLowerCase().includes("fecha") ||
+          f.toLowerCase().includes("date")
+      );
+      if (fechaCol) {
+        const [months] = await connection.query(
+          `SELECT DATE_FORMAT(\`${fechaCol}\`, '%Y-%m') AS month, COUNT(*) AS total
+           FROM pat_bien WHERE \`${fechaCol}\` IS NOT NULL
+           GROUP BY DATE_FORMAT(\`${fechaCol}\`, '%Y-%m')
+           ORDER BY month ASC
+           LIMIT 12`
+        );
+        byMonth = months as { month: string; total: number }[];
+      }
+    } catch {
+      byMonth = [];
+    }
+
     connection.release();
-    
+
     res.json({
       summary: {
-        total: (totalResult as any[])[0].total
+        total: (totals as any).total,
+        stockTotal: Number((totals as any).stockTotal),
+        oficinasActivas: Number((totals as any).oficinasActivas ?? 0),
       },
-      porUnidad: porUnidad
+      byOficina: topOficinas,
+      byMonth,
+      porUnidad: legacyPorUnidad,
     });
   } catch (error: any) {
     res.status(500).json({ error: error.message });

@@ -13,11 +13,20 @@ const DEFAULT_LOCAL_API_URL = "http://10.10.10.13:3000";
 // Detectar si estamos en un entorno móvil (Capacitor)
 const origin = window.origin || "";
 const userAgent = navigator.userAgent || "";
-const hasCapacitorObject = typeof (window as any).Capacitor !== "undefined";
+const capacitor = (window as any).Capacitor;
+const hasCapacitorObject = typeof capacitor !== "undefined";
 const isCapacitorOrigin = origin.startsWith('capacitor://') || origin.startsWith('ionic://');
 const isLocalhostOrigin = origin.startsWith('http://localhost') || origin.startsWith('https://localhost');
 const hasCapacitorUserAgent = /Capacitor|cordova|ionic/i.test(userAgent);
-const isCapacitor = hasCapacitorObject || isCapacitorOrigin || (isLocalhostOrigin && hasCapacitorUserAgent) || window.location.protocol === 'capacitor:' || (window.location.protocol === 'file:' && hasCapacitorUserAgent);
+const isNgrokWeb = origin.includes(".ngrok-free.app") || origin.includes(".ngrok-free.dev") || origin.includes(".ngrok.io");
+const isNativePlatform = !!(hasCapacitorObject && typeof capacitor.isNativePlatform === "function" && capacitor.isNativePlatform());
+const isCapacitor = !isNgrokWeb && (
+  isNativePlatform ||
+  isCapacitorOrigin ||
+  (isLocalhostOrigin && hasCapacitorUserAgent) ||
+  window.location.protocol === 'capacitor:' ||
+  (window.location.protocol === 'file:' && hasCapacitorUserAgent)
+);
 
 // Lógica de URL Base
 // 1. Prioridad: URL guardada manualmente por el usuario en el app (para no re-generar APK)
@@ -39,7 +48,7 @@ export const getApiHeaders = (extraHeaders: Record<string, string> = {}) => {
 
   // Si estamos usando una URL de ngrok (túnel), añadimos el header para saltar la advertencia
   const currentUrl = API_BASE_URL || window.location.origin;
-  if (currentUrl.includes('ngrok')) {
+  if (currentUrl.includes('ngrok') || window.location.hostname.includes('ngrok')) {
     headers['ngrok-skip-browser-warning'] = 'true';
   }
 

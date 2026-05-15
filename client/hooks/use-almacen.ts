@@ -22,7 +22,10 @@ export function useAlmacen() {
     setError(null);
     try {
       const res = await fetch(`${API_BASE_URL}/api/productos`, { headers: getApiHeaders() });
-      if (!res.ok) throw new Error("Error al cargar productos de almacén");
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(`Error al cargar productos (${res.status}): ${text.slice(0, 50)}`);
+      }
       const data = await res.json();
       setProducts(data);
     } catch (err: any) {

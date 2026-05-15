@@ -19,3 +19,21 @@
 # If you keep the line number table, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+
+# Capacitor / WebView bridge
+-keepattributes *Annotation*, InnerClasses, EnclosingMethod, Signature, Exceptions
+-keep class com.getcapacitor.** { *; }
+-keep class com.capacitorjs.** { *; }
+-keep public class * extends com.getcapacitor.plugin.CapacitorPlugin
+-keepclassmembers class * extends com.getcapacitor.plugin.CapacitorPlugin {
+    @com.getcapacitor.PluginMethod public *;
+}
+-dontwarn com.getcapacitor.**
+
+# Plugins comunitarios (escáner, etc.)
+-keep class com.capacitorcommunity.** { *; }
+-keep class io.capawesome.** { *; }
+
+# Kotlin
+-dontwarn kotlin.**
+-keep class kotlin.Metadata { *; }

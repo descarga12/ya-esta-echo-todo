@@ -27,8 +27,14 @@ export function useImageUpload() {
       });
 
       if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.error || "Error al subir imagen");
+        let errorMsg = "Error al subir imagen";
+        try {
+          const data = await response.json();
+          errorMsg = data.error || errorMsg;
+        } catch {
+          errorMsg = `Error del servidor (${response.status})`;
+        }
+        throw new Error(errorMsg);
       }
 
       const data: UploadResponse = await response.json();

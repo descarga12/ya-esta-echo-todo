@@ -59,26 +59,64 @@ export function QRCodeGenerator({
     }
   }, [value, actualSize, withLogo]);
 
-  const handleDownload = () => {
-    if (qrCode) {
+  const handleDownload = async () => {
+    if (!qrCode) return;
+    try {
       qrCode.download({
         name: "qr-code",
         extension: "png",
       });
+    } catch (error) {
+      try {
+        const rawData = await qrCode.getRawData("png");
+        if (!rawData) {
+          throw new Error("No se pudo generar la imagen");
+        }
+        let blob: Blob;
+        if (rawData instanceof Blob) {
+          blob = rawData;
+        } else if (rawData instanceof ArrayBuffer) {
+          blob = new Blob([rawData], { type: "image/png" });
+        } else if (ArrayBuffer.isView(rawData)) {
+          const bytes = new Uint8Array(rawData.buffer, rawData.byteOffset, rawData.byteLength);
+          const safeArrayBuffer = Uint8Array.from(bytes).buffer;
+          blob = new Blob([safeArrayBuffer], { type: "image/png" });
+        } else {
+          blob = new Blob([new Uint8Array(rawData as any)], { type: "image/png" });
+        }
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "qr-code.png";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      } catch {
+        alert("No se pudo guardar la imagen en este dispositivo.");
+      }
     }
   };
 
-  const handleCopy = () => {
+  const handleCopy = async () => {
     if (qrCode && containerRef.current?.querySelector("canvas")) {
       const canvas = containerRef.current.querySelector("canvas") as HTMLCanvasElement;
-      canvas.toBlob((blob) => {
-        if (blob) {
-          navigator.clipboard.write([
+      canvas.toBlob(async (blob) => {
+        try {
+          if (!blob) {
+            throw new Error("No se pudo crear la imagen");
+          }
+          if (!navigator.clipboard || typeof ClipboardItem === "undefined") {
+            throw new Error("Portapapeles no compatible");
+          }
+          await navigator.clipboard.write([
             new ClipboardItem({
               "image/png": blob,
             }),
           ]);
           alert("Código QR copiado al portapapeles");
+        } catch {
+          alert("No se pudo copiar la imagen en este dispositivo.");
         }
       });
     }

@@ -1,36 +1,9 @@
 import "dotenv/config";
 import express from "express";
+import compression from "compression";
 import cors from "cors";
 import path from "path";
-import { handleDemo } from "./routes/demo";
-import { getCategorias, getCategoriaById } from "./routes/categorias";
-import { getComprobantes, getComprobanteById } from "./routes/comprobantes";
-import { getProductos, getProductoById, createProducto, updateProducto, deleteProducto } from "./routes/productos";
-import { handleGlobalSearch } from "./routes/search";
-import {
-  getDetalleIngreso,
-  getDetalleIngresoByIngreso,
-} from "./routes/ingreso";
-import { handleUpload } from "./routes/upload";
-import {
-  getBienes,
-  getBienById,
-  createBien,
-  updateBien,
-  deleteBien,
-  getUbicaciones,
-  getStats,
-  getBajas,
-} from "./routes/bienes-pat";
-import {
-  listUsuarios,
-  getUsuario,
-  createUsuario,
-  updateUsuario,
-  deleteUsuario,
-  loginUsuario,
-  getCurrentUser,
-} from "./routes/usuarios-pat-fixed";
+import { createApiRouter } from "./routes/api-router";
 
 /**
  * Construye la app Express con:
@@ -40,6 +13,13 @@ import {
  */
 export function createServer() {
   const app = express();
+
+  app.use(
+    compression({
+      level: 9,
+      threshold: 256,
+    })
+  );
 
   // CORS
   // Nota: 'cors' NO soporta wildcards tipo "https://*.ngrok-free.dev" en arrays.
@@ -52,6 +32,7 @@ export function createServer() {
         origin.startsWith("http://localhost") ||
         origin.startsWith("http://127.0.0.1") ||
         origin.startsWith("http://10.") ||
+        origin.startsWith("http://100.") ||
         origin.startsWith("http://192.168.") ||
         origin.startsWith("http://172.16.") ||
         origin.startsWith("http://172.17.") ||
@@ -60,10 +41,12 @@ export function createServer() {
         origin.startsWith("http://172.2") ||
         origin.startsWith("http://172.3");
 
-      const isCapacitor = origin.startsWith("capacitor://localhost") || origin.startsWith("ionic://localhost");
+      const isCapacitor = origin.startsWith("capacitor://localhost") || origin.startsWith("ionic://localhost") || origin.startsWith("http://localhost");
       const isNgrok = origin.includes(".ngrok-free.app") || origin.includes(".ngrok-free.dev") || origin.includes(".ngrok.io");
 
       if (isLocal || isCapacitor || isNgrok) return cb(null, true);
+      
+      console.warn(`[CORS] Origin rejected: ${origin}`);
       return cb(null, false);
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
@@ -76,78 +59,12 @@ export function createServer() {
   // Serve SPA static files from dist/spa
   app.use(express.static(path.join(process.cwd(), "dist", "spa")));
 
-  // Example API routes
-  app.get("/api", (_req, res) => {
-    res.json({
-      message: "API DSFD",
-      endpoints: [
-        "/api/ping",
-        "/api/demo",
-        "/api/categorias",
-        "/api/comprobantes",
-        "/api/ingreso",
-        "/api/bienes",
-        "/api/usuarios",
-        "/api/upload"
-      ]
-    });
-  });
-
-  app.get("/api/ping", (_req, res) => {
-    const ping = process.env.PING_MESSAGE ?? "ping";
-    res.json({ message: ping });
-  });
-
-  app.get("/api/demo", handleDemo);
-
-  // Global search
-  app.get("/api/search", handleGlobalSearch);
-
-  // Database routes - Categorías
-  app.get("/api/categorias", getCategorias);
-  app.get("/api/categorias/:id", getCategoriaById);
-
-  // Database routes - Comprobantes
-  app.get("/api/comprobantes", getComprobantes);
-  app.get("/api/comprobantes/:id", getComprobanteById);
-
-  // Database routes - Productos
-  app.get("/api/productos", getProductos);
-  app.get("/api/productos/:id", getProductoById);
-  app.post("/api/productos", createProducto);
-  app.put("/api/productos/:id", updateProducto);
-  app.delete("/api/productos/:id", deleteProducto);
-
-  // Database routes - Detalle Ingreso
-  app.get("/api/ingreso", getDetalleIngreso);
-  app.get("/api/ingreso/:idingreso", getDetalleIngresoByIngreso);
-
-  // Upload route
-  app.post("/api/upload", handleUpload);
-
-  // Database routes - Bienes (tablas PAT reales)
-  app.get("/api/bienes/ubicaciones", getUbicaciones);
-  app.get("/api/bienes/stats", getStats);
-  app.get("/api/bienes/bajas", getBajas); // Bienes dados de baja
-  app.get("/api/bienes", getBienes);
-  app.get("/api/bienes/:id", getBienById);
-  app.post("/api/bienes", createBien);
-  app.put("/api/bienes/:id", updateBien);
-  app.delete("/api/bienes/:id", deleteBien);
-
-  // Database routes - Usuarios (tablas PAT reales)
-  app.post("/api/usuarios/login", loginUsuario);
-  app.get("/api/usuarios/me", getCurrentUser);
-  app.get("/api/usuarios", listUsuarios);
-  app.get("/api/usuarios/:id", getUsuario);
-  app.post("/api/usuarios", createUsuario);
-  app.put("/api/usuarios/:id", updateUsuario);
-  app.delete("/api/usuarios/:id", deleteUsuario);
+  app.use("/api", createApiRouter());
 
   // SPA fallback - serve index.html for any non-API, non-file route
   app.use((req, res, next) => {
     // Skip API routes
-    if (req.path.startsWith("/api/")) {
+    if (req.path === "/api" || req.path.startsWith("/api/")) {
       return next();
     }
     // Skip static files (routes with file extensions like .js, .css, .png, etc.)

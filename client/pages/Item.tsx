@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { QRCodeGenerator } from "@/components/qr/QRCodeGenerator";
 import { API_BASE_URL, getApiHeaders } from "@/lib/api-config";
+import { displayRegistranteNombre } from "@/hooks/use-bienes";
 
 /**
  * ============================================
@@ -26,7 +27,7 @@ interface ItemData {
   ubicacion?: string;            // Ubicación física
   foto?: string;                 // URL de la imagen (en español)
   qr_code?: string;              // Código QR asociado
-  registrado_por?: string;       // Username del registrador
+  registrado_por?: string | number; // Id o usuario del registrador
   registrado_nombre?: string;    // Nombre del registrador
   registrado_unidad?: string;    // Unidad orgánica del registrador
   registrado_cargo?: string;     // Cargo del registrador
@@ -163,7 +164,7 @@ export default function Item() {
         
         {/* Información del registrador */}
         <p className="text-sm text-muted-foreground">
-          Registrado por: {item.registrado_nombre || item.registrado_por || "-"}
+          Registrado por: {displayRegistranteNombre(item)}
         </p>
         
         {/* Sección de foto del artículo */}

@@ -6,9 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { 
   Users as UsersIcon, 
-  Key, 
   UserPlus, 
-  Shield, 
+  Shield,
+  Edit3,
   Trash2, 
   ArrowLeft,
   Search,
@@ -31,9 +31,16 @@ interface DBUser {
   username: string;
   nombre: string;
   cargo: string;
-  rol: string;
+  rol: "admin" | "registrar" | "viewer";
   estado: number;
   unidad_organica: string;
+}
+
+interface UserEditForm {
+  username: string;
+  rol: "admin" | "registrar" | "viewer";
+  estado: number;
+  newPassword: string;
 }
 
 export default function Users() {
@@ -41,9 +48,14 @@ export default function Users() {
   const [users, setUsers] = useState<DBUser[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
-  const [selectedUser, setSelectedUser] = useState<DBUser | null>(null);
-  const [newPassword, setNewPassword] = useState("");
-  const [isChangingPass, setIsChangingPass] = useState(false);
+  const [editingUser, setEditingUser] = useState<DBUser | null>(null);
+  const [editForm, setEditForm] = useState<UserEditForm>({
+    username: "",
+    rol: "registrar",
+    estado: 1,
+    newPassword: "",
+  });
+  const [savingEdit, setSavingEdit] = useState(false);
   const [msg, setMsg] = useState<{type: 'success' | 'error', text: string} | null>(null);
 
   // Redirigir si no es admin
@@ -56,7 +68,19 @@ export default function Users() {
         headers: getApiHeaders()
       });
       const data = await res.json();
-      setUsers(data);
+      const normalized: DBUser[] = (Array.isArray(data) ? data : []).map((u: any) => {
+        const cargo = String(u.cargo || "").toLowerCase();
+        const rol: DBUser["rol"] = cargo.includes("admin")
+          ? "admin"
+          : cargo.includes("view")
+            ? "viewer"
+            : "registrar";
+        return {
+          ...u,
+          rol,
+        };
+      });
+      setUsers(normalized);
     } catch (e) {
       console.error(e);
     } finally {
@@ -68,34 +92,6 @@ export default function Users() {
     fetchUsers();
   }, []);
 
-  const handleChangePassword = async () => {
-    if (!selectedUser || !newPassword) return;
-    
-    setIsChangingPass(true);
-    try {
-      const res = await fetch(`${API_BASE_URL}/api/usuarios/password`, {
-        method: 'PUT',
-        headers: { 
-          ...getApiHeaders(),
-          'Content-Type': 'application/json' 
-        },
-        body: JSON.stringify({ id: selectedUser.id, newPassword })
-      });
-      
-      if (res.ok) {
-        setMsg({ type: 'success', text: `Contraseña de @${selectedUser.username} actualizada.` });
-        setNewPassword("");
-        setSelectedUser(null);
-      } else {
-        setMsg({ type: 'error', text: 'Error al cambiar la contraseña.' });
-      }
-    } catch (e) {
-      setMsg({ type: 'error', text: 'Error de conexión.' });
-    } finally {
-      setIsChangingPass(false);
-    }
-  };
-
   const handleDelete = async (id: number) => {
     if (!window.confirm("¿Estás seguro de que deseas eliminar este usuario?")) return;
     try {
@@ -106,6 +102,68 @@ export default function Users() {
       if (res.ok) fetchUsers();
     } catch (err) {
       console.error(err);
+    }
+  };
+
+  const openEditDialog = (u: DBUser) => {
+    setEditingUser(u);
+    setEditForm({
+      username: u.username || "",
+      rol: u.rol || "registrar",
+      estado: u.estado ?? 1,
+      newPassword: "",
+    });
+  };
+
+  const handleSaveUserEdit = async () => {
+    if (!editingUser) return;
+    setSavingEdit(true);
+    try {
+      const updateRes = await fetch(`${API_BASE_URL}/api/usuarios/${editingUser.id}`, {
+        method: "PUT",
+        headers: {
+          ...getApiHeaders(),
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          username: editForm.username,
+          rol: editForm.rol,
+          estado: Number(editForm.estado),
+        }),
+      });
+
+      if (!updateRes.ok) {
+        setMsg({ type: "error", text: "No se pudo actualizar usuario/rol/estado." });
+        return;
+      }
+
+      if (editForm.newPassword.trim()) {
+        const passRes = await fetch(`${API_BASE_URL}/api/usuarios/password`, {
+          method: "PUT",
+          headers: {
+            ...getApiHeaders(),
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            id: editingUser.id,
+            newPassword: editForm.newPassword.trim(),
+          }),
+        });
+        if (!passRes.ok) {
+          setMsg({ type: "error", text: "Usuario actualizado, pero no se pudo cambiar la contraseña." });
+          await fetchUsers();
+          setEditingUser(null);
+          return;
+        }
+      }
+
+      await fetchUsers();
+      setEditingUser(null);
+      setMsg({ type: "success", text: `Usuario @${editingUser.username} actualizado correctamente.` });
+    } catch (err) {
+      setMsg({ type: "error", text: "Error de conexión al actualizar usuario." });
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -192,11 +250,17 @@ export default function Users() {
                     <span className="text-sm font-mono text-blue-400 bg-blue-400/10 px-2 py-1 rounded-lg">@{u.username}</span>
                   </td>
                   <td className="p-5">
-                    <div className="flex flex-col">
-                      <span className={`text-[10px] font-black uppercase tracking-widest mb-1 px-2 py-0.5 rounded-full w-fit ${
-                        u.rol?.toUpperCase() === 'ADMINISTRADOR' ? 'bg-amber-500/10 text-amber-500 border border-amber-500/20' : 'bg-slate-800 text-slate-400'
-                      }`}>
-                        {u.rol || 'USUARIO'}
+                    <div className="flex flex-col gap-2">
+                      <span
+                        className={`text-[10px] font-black uppercase tracking-widest mb-1 px-2 py-0.5 rounded-full w-fit ${
+                          u.rol === "admin"
+                            ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                            : u.rol === "viewer"
+                              ? "bg-violet-500/10 text-violet-400 border border-violet-500/20"
+                              : "bg-slate-800 text-slate-400"
+                        }`}
+                      >
+                        {u.rol}
                       </span>
                       <span className="text-xs text-slate-400">{u.cargo}</span>
                     </div>
@@ -209,47 +273,77 @@ export default function Users() {
                   </td>
                   <td className="p-5 text-right">
                     <div className="flex items-center justify-end gap-2">
-                      <Dialog>
+                      <Dialog open={editingUser?.id === u.id} onOpenChange={(open) => !open && setEditingUser(null)}>
                         <DialogTrigger asChild>
-                          <Button 
-                            variant="ghost" 
+                          <Button
+                            variant="ghost"
                             size="sm"
-                            onClick={() => setSelectedUser(u)}
-                            className="h-9 px-3 rounded-xl bg-slate-800/50 hover:bg-amber-500/10 hover:text-amber-500 transition-all gap-2"
+                            onClick={() => openEditDialog(u)}
+                            className="h-9 px-3 rounded-xl bg-slate-800/50 hover:bg-indigo-500/10 hover:text-indigo-400 transition-all gap-2"
                           >
-                            <Key className="w-4 h-4" />
-                            <span className="text-xs font-bold uppercase">Pass</span>
+                            <Edit3 className="w-4 h-4" />
+                            <span className="text-xs font-bold uppercase">Editar</span>
                           </Button>
                         </DialogTrigger>
-                        <DialogContent className="bg-slate-900 border-slate-800 text-white rounded-3xl max-w-sm">
+                        <DialogContent className="bg-slate-900 border-slate-800 text-white rounded-3xl max-w-md">
                           <DialogHeader>
-                            <DialogTitle className="text-2xl font-black">Cambiar Contraseña</DialogTitle>
+                            <DialogTitle className="text-2xl font-black">Editar Usuario</DialogTitle>
                             <DialogDescription className="text-slate-500">
-                              Actualizar credenciales para @{u.username}
+                              Modifica usuario, rol/cargo, estado y contraseña.
                             </DialogDescription>
                           </DialogHeader>
-                          <div className="space-y-4 py-4">
+                          <div className="space-y-4 py-2">
                             <div className="space-y-2">
-                              <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Nueva Contraseña</Label>
-                              <div className="relative">
-                                <Key className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-600" />
-                                <Input 
-                                  type="password"
-                                  placeholder="••••••••"
-                                  value={newPassword}
-                                  onChange={(e) => setNewPassword(e.target.value)}
-                                  className="bg-slate-950 border-slate-800 rounded-xl h-12 pl-11 focus-visible:ring-blue-500/50"
-                                />
+                              <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Usuario</Label>
+                              <Input
+                                value={editForm.username}
+                                onChange={(e) => setEditForm((prev) => ({ ...prev, username: e.target.value }))}
+                                className="bg-slate-950 border-slate-800 rounded-xl h-11"
+                              />
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="space-y-2">
+                                <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Rol / Cargo</Label>
+                                <select
+                                  value={editForm.rol}
+                                  onChange={(e) => setEditForm((prev) => ({ ...prev, rol: e.target.value as UserEditForm["rol"] }))}
+                                  className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-sm"
+                                >
+                                  <option value="admin">admin</option>
+                                  <option value="registrar">registrar</option>
+                                  <option value="viewer">viewer</option>
+                                </select>
                               </div>
+                              <div className="space-y-2">
+                                <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Estado</Label>
+                                <select
+                                  value={String(editForm.estado)}
+                                  onChange={(e) => setEditForm((prev) => ({ ...prev, estado: Number(e.target.value) }))}
+                                  className="w-full bg-slate-950 border border-slate-800 rounded-xl h-11 px-3 text-sm"
+                                >
+                                  <option value="1">Activo</option>
+                                  <option value="0">Inactivo</option>
+                                </select>
+                              </div>
+                            </div>
+                            <div className="space-y-2">
+                              <Label className="text-xs font-bold text-slate-500 uppercase tracking-widest">Contraseña (opcional)</Label>
+                              <Input
+                                type="password"
+                                placeholder="Dejar vacío para no cambiar"
+                                value={editForm.newPassword}
+                                onChange={(e) => setEditForm((prev) => ({ ...prev, newPassword: e.target.value }))}
+                                className="bg-slate-950 border-slate-800 rounded-xl h-11"
+                              />
                             </div>
                           </div>
                           <DialogFooter>
-                            <Button 
-                              onClick={handleChangePassword}
-                              disabled={!newPassword || isChangingPass}
-                              className="w-full bg-blue-600 hover:bg-blue-500 h-12 font-black rounded-xl"
+                            <Button
+                              onClick={handleSaveUserEdit}
+                              disabled={savingEdit || !editForm.username.trim()}
+                              className="w-full bg-indigo-600 hover:bg-indigo-500 h-11 font-black rounded-xl"
                             >
-                              {isChangingPass ? "Actualizando..." : "Guardar Cambios"}
+                              {savingEdit ? "Guardando..." : "Guardar cambios"}
                             </Button>
                           </DialogFooter>
                         </DialogContent>

@@ -140,7 +140,7 @@ export default function Almacen() {
               </div>
 
               <Button 
-                onClick={() => generateAlmacenPDF(filteredProducts)}
+                onClick={() => void generateAlmacenPDF(filteredProducts)}
                 variant="outline"
                 className="bg-cyan-600/10 text-cyan-400 border-cyan-600/20 hover:bg-cyan-600/20 h-14 px-6 rounded-2xl gap-2 hidden md:flex"
               >

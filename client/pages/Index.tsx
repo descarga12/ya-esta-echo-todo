@@ -1,6 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import QRScanner from "@/components/qr/QRScanner";
-import { QRCodeGenerator } from "@/components/qr/QRCodeGenerator";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -15,7 +13,7 @@ import {
   DialogDescription,
 } from "@/components/ui/dialog";
 import { useAuth } from "@/lib/auth-context";
-import { useBienes, Bien } from "@/hooks/use-bienes";
+import { useBienes, Bien, displayRegistranteNombre } from "@/hooks/use-bienes";
 import { useImageUpload } from "@/hooks/use-image-upload";
 import { generateUserBienesPDF } from "@/lib/pdf-utils";
 import { API_BASE_URL, getApiHeaders } from "../lib/api-config";
@@ -39,6 +37,14 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+// Cargar modulos QR bajo demanda para mejorar rendimiento en dispositivos de gama baja.
+const QRScanner = lazy(() => import("@/components/qr/QRScanner"));
+const QRCodeGenerator = lazy(() =>
+  import("@/components/qr/QRCodeGenerator").then((mod) => ({
+    default: mod.QRCodeGenerator,
+  }))
+);
+
 /**
  * Parsea el texto escaneado de un código QR.
  */
@@ -47,13 +53,40 @@ function parseQR(text: string): Partial<Bien> {
     const data = JSON.parse(text);
     return {
       nombre: data.name || data.titulo || "",
-      sku: data.sku || data.codigo || data.id || text,
       ubicacion: data.location || data.ubicacion || "",
       qr_code: text,
     };
   } catch {
-    return { sku: text, qr_code: text };
+    return { qr_code: text };
   }
+}
+
+const UBICACIONES_CACHE_KEY = "bienes.ubicaciones.cache.v1";
+
+/** Extrae el id del bien si el QR es una URL tipo .../item/ABC123 */
+function extractItemIdFromScan(text: string): string | null {
+  const t = text.trim();
+  try {
+    const u = new URL(t);
+    const m = u.pathname.match(/\/item\/([^/]+)/);
+    return m?.[1] ?? null;
+  } catch {
+    const m = t.match(/\/item\/([^/?#]+)/);
+    return m?.[1] ?? null;
+  }
+}
+
+function findBienByScan(items: Bien[], text: string, suggestion: Partial<Bien>): Bien | undefined {
+  const trimmed = text.trim();
+  const fromUrl = extractItemIdFromScan(text);
+  return items.find((it) => {
+    if (suggestion.sku && it.sku === suggestion.sku) return true;
+    if (it.qr_code && it.qr_code === trimmed) return true;
+    if (it.id === trimmed) return true;
+    if (fromUrl && it.id === fromUrl) return true;
+    if (it.sku === trimmed) return true;
+    return false;
+  });
 }
 
 export default function Index() {
@@ -63,6 +96,7 @@ export default function Index() {
   
   const [query, setQuery] = useState("");
   const [scanError, setScanError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const [selectedItemForQR, setSelectedItemForQR] = useState<Bien | null>(null);
   const [draft, setDraft] = useState<Partial<Bien> & { photoPreview?: string }>({ cantidad: 1 });
@@ -78,21 +112,33 @@ export default function Index() {
   const [reportUser, setReportUser] = useState<string>("all");
 
   useEffect(() => {
+    try {
+      const raw = localStorage.getItem(UBICACIONES_CACHE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length) setLocations(parsed);
+      }
+    } catch {
+      /* ignore */
+    }
+
     fetch(`${API_BASE_URL}/api/bienes/ubicaciones`, {
       headers: getApiHeaders()
     })
-      .then(res => res.json())
+      .then(res => {
+        if (!res.ok) throw new Error(`HTTP error! status: ${res.status}`);
+        return res.json();
+      })
       .then(data => {
         if (Array.isArray(data)) {
           setLocations(data);
+          localStorage.setItem(UBICACIONES_CACHE_KEY, JSON.stringify(data));
         } else {
           console.error("Ubicaciones no es un array:", data);
-          setLocations([]);
         }
       })
       .catch(err => {
         console.error("Error cargando ubicaciones:", err);
-        setLocations([]);
       });
   }, []);
 
@@ -104,11 +150,28 @@ export default function Index() {
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     return items.filter((it) => {
+      const haystack = [
+        it.nombre,
+        it.sku,
+        it.ubicacion,
+        it.id,
+        it.qr_code,
+        it.registrado_nombre,
+        it.registrado_unidad,
+        it.registrado_cargo,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
       const matchesQuery =
         !q ||
+        haystack.includes(q) ||
         (it.nombre || "").toLowerCase().includes(q) ||
         (it.sku || "").toLowerCase().includes(q) ||
-        (it.ubicacion || "").toLowerCase().includes(q);
+        (it.ubicacion || "").toLowerCase().includes(q) ||
+        (it.id || "").toLowerCase().includes(q) ||
+        (it.qr_code || "").toLowerCase().includes(q) ||
+        (it.registrado_nombre || "").toLowerCase().includes(q);
       
       if (!matchesQuery) return false;
       
@@ -123,13 +186,14 @@ export default function Index() {
   const onScan = (text: string) => {
     setScanError(null);
     const suggestion = parseQR(text);
-    const existing = items.find((it) => it.sku === suggestion.sku);
+    const existing = findBienByScan(items, text, suggestion);
+    
     if (existing) {
-      update(existing.id, {
-        cantidad: Math.max(0, (existing.cantidad || 0) + 1),
-        qr_code: text,
-      });
+      // Si el bien existe, lo buscamos en la interfaz filtrando por su SKU
+      setQuery(existing.sku || existing.id);
+      // Opcional: podrías también abrir un detalle o hacer scroll hasta él.
     } else {
+      // Si no existe, sugerimos crearlo
       setDraft({ cantidad: 1, ...suggestion });
       setOpen(true);
     }
@@ -137,11 +201,21 @@ export default function Index() {
 
   const submitDraft = async () => {
     const name = (draft.nombre || "").trim();
-    if (!name) return;
+    const sku = (draft.sku || "").trim();
+    if (!name) {
+      setFormError("El nombre del bien es obligatorio.");
+      return;
+    }
+    if (!sku) {
+      setFormError("El SKU es obligatorio y manual. No se genera automáticamente.");
+      return;
+    }
+    setFormError(null);
 
     const payload: any = {
       ...draft,
       nombre: name,
+      sku,
       registrado_por: draft.registrado_por || currentUserSession?.id?.toString(),
       registrado_nombre: draft.registrado_nombre || currentUserSession?.nombre,
       registrado_unidad: draft.registrado_unidad || currentUserSession?.unidad_organica,
@@ -162,7 +236,7 @@ export default function Index() {
   const generateUserReport = () => {
     if (reportUser === "all") return;
     const userItems = items.filter(it => it.registrado_nombre === reportUser);
-    generateUserBienesPDF(reportUser, userItems);
+    void generateUserBienesPDF(reportUser, userItems);
   };
 
   return (
@@ -228,6 +302,11 @@ export default function Index() {
                     </DialogDescription>
                   </DialogHeader>
                   <div className="grid gap-6 py-4">
+                    {formError && (
+                      <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+                        {formError}
+                      </div>
+                    )}
                     <div className="space-y-2">
                       <Label className="text-xs font-bold text-slate-500 uppercase tracking-wider ml-1">Nombre del Bien</Label>
                       <Input 
@@ -347,7 +426,7 @@ export default function Index() {
               <Search size={20} />
             </div>
             <Input 
-              placeholder="Buscar por nombre, SKU o ubicación..."
+              placeholder="Buscar (funciona sin internet en datos guardados): nombre, SKU, ubicación, código QR..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               className="bg-slate-900/50 border-slate-800 pl-12 h-14 rounded-2xl text-white placeholder:text-slate-600 focus-visible:ring-blue-500/50"
@@ -376,11 +455,40 @@ export default function Index() {
               {viewMode === "grid" ? <ListIcon /> : <LayoutGrid />}
             </Button>
             
-            <div className="flex-1 lg:flex-none">
-              <QRScanner onResult={onScan} onError={(e) => setScanError(e.message)} />
+            <div className="flex-1 lg:flex-none min-w-[140px] lg:min-w-[180px]">
+              <Suspense fallback={<Button disabled className="w-full h-14 rounded-2xl">Cargando QR...</Button>}>
+                <QRScanner onResult={onScan} onError={(e) => setScanError(e.message)} />
+              </Suspense>
             </div>
           </div>
         </div>
+
+        {items.length > 0 && (
+          <p className="text-xs text-slate-500 px-1 text-center sm:text-left">
+            Mostrando <span className="font-semibold text-slate-300">{filtered.length}</span> de{" "}
+            <span className="font-semibold text-slate-300">{items.length}</span> bienes en inventario
+            {query.trim() ||
+            filterUnidad !== "all" ||
+            filterCargo !== "all" ||
+            filterUser !== "all" ? (
+              <span className="text-slate-600"> · filtros o búsqueda activos</span>
+            ) : null}
+          </p>
+        )}
+
+        {typeof navigator !== "undefined" && !navigator.onLine && (
+          <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-100 flex items-center gap-2">
+            <AlertCircle className="w-4 h-4 shrink-0 text-amber-400" />
+            Sin conexión: la búsqueda usa solo los bienes ya guardados en este dispositivo.
+          </div>
+        )}
+
+        {scanError && (
+          <div className="rounded-2xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-200 flex items-center justify-between gap-2">
+            <span>{scanError}</span>
+            <button type="button" className="text-xs font-bold uppercase opacity-80 hover:opacity-100" onClick={() => setScanError(null)}>Cerrar</button>
+          </div>
+        )}
 
         {error && (
         <div className="rounded-3xl border border-red-500/20 bg-red-500/10 p-6 text-red-200 space-y-3">
@@ -488,6 +596,8 @@ export default function Index() {
                   <img 
                     src={item.foto} 
                     alt={item.nombre} 
+                    loading="lazy"
+                    decoding="async"
                     className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500" 
                   />
                 </div>
@@ -523,7 +633,7 @@ export default function Index() {
                   </div>
                 </div>
                 <CardTitle className="text-xl font-bold text-white group-hover:text-blue-400 transition-colors line-clamp-1">
-                  {item.nombre}
+                  {(item.nombre || "").trim() || "Sin nombre"}
                 </CardTitle>
                 <p className="text-xs font-mono text-slate-500 tracking-tighter mt-1">{item.sku}</p>
               </CardHeader>
@@ -554,9 +664,14 @@ export default function Index() {
                       "flex flex-col gap-0.5 px-3 py-2 rounded-xl text-[10px] font-black uppercase tracking-widest w-full",
                       badgeColor === "teal" ? "bg-teal-500/10 text-teal-500 border border-teal-500/20" : "bg-blue-500/10 text-blue-500 border border-blue-500/20"
                     )}>
+                      <p className="text-[9px] font-bold text-slate-500 normal-case tracking-wide">
+                        Registró
+                      </p>
                       <div className="flex items-center gap-2">
                         <UserIcon size={12} />
-                        <span className="truncate">{item.registrado_nombre || "Usuario"}</span>
+                        <span className="truncate normal-case tracking-normal font-semibold">
+                          {displayRegistranteNombre(item)}
+                        </span>
                       </div>
                       {item.registrado_unidad && (
                         <div className="flex items-center gap-2 opacity-70 mt-1">
@@ -585,10 +700,12 @@ export default function Index() {
           <div className="flex flex-col items-center justify-center p-8 space-y-6">
             <div className="p-6 bg-white rounded-3xl shadow-2xl">
               {selectedItemForQR && (
-                <QRCodeGenerator 
-                  value={selectedItemForQR.qr_code || selectedItemForQR.sku} 
-                  size="sm"
-                />
+                <Suspense fallback={<div className="text-xs text-slate-500">Generando QR...</div>}>
+                  <QRCodeGenerator 
+                    value={selectedItemForQR.qr_code || selectedItemForQR.sku} 
+                    size="sm"
+                  />
+                </Suspense>
               )}
             </div>
             <div className="text-center">

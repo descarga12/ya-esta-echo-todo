@@ -27,15 +27,26 @@ import {
   ArrowRight
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { jsPDF } from "jspdf";
-import "jspdf-autotable";
+import {
+  createCompressedJsPDF,
+  clipPdfText,
+  isHeavyPdfRowCount,
+} from "@/lib/pdf-utils";
 
 const COLORS = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#16a34a'];
+
+/** Devuelve el control al navegador antes de trabajo pesado (PDF) para no “congelar” la UI */
+function yieldToMain() {
+  return new Promise<void>((resolve) => {
+    requestAnimationFrame(() => setTimeout(resolve, 0));
+  });
+}
 
 export default function Reportes() {
   const [stats, setStats] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   useEffect(() => {
     const baseUrl = API_BASE_URL || window.location.origin;
@@ -62,8 +73,9 @@ export default function Reportes() {
   }, []);
 
   const downloadGeneralStockPDF = async () => {
-    if (!stats) return;
-    
+    if (!stats || pdfLoading) return;
+
+    setPdfLoading(true);
     try {
       const baseUrl = API_BASE_URL || window.location.origin;
       const res = await fetch(`${baseUrl}/api/bienes`, {
@@ -71,7 +83,9 @@ export default function Reportes() {
       });
       const bienes = await res.json();
 
-      const doc = new jsPDF() as any;
+      await yieldToMain();
+
+      const doc = await createCompressedJsPDF();
       
       // Header
       doc.setFillColor(37, 99, 235);
@@ -93,32 +107,51 @@ export default function Reportes() {
       // Stats Summary in PDF
       doc.setFontSize(10);
       doc.text(`Total de Bienes Únicos: ${stats.summary.total}`, 14, 55);
-      doc.text(`Stock Total Acumulado: ${stats.summary.stockTotal}`, 14, 62);
+      doc.text(
+        `Stock Total Acumulado: ${stats.summary.stockTotal ?? "—"}`,
+        14,
+        62
+      );
       doc.text(`Fecha de Emisión: ${new Date().toLocaleDateString()}`, 14, 69);
 
       // Table of all items
       const tableColumn = ["CÓDIGO/SKU", "DENOMINACIÓN", "CANT.", "UBICACIÓN", "REGISTRO"];
+      const heavy = isHeavyPdfRowCount(Array.isArray(bienes) ? bienes.length : 0);
       const tableRows = bienes.map((b: any) => [
-        b.sku || "N/A",
-        (b.nombre || "Sin nombre").toUpperCase(),
+        clipPdfText(b.sku || "N/A", 16),
+        clipPdfText((b.nombre || "Sin nombre").toUpperCase(), heavy ? 30 : 42),
         b.cantidad || 0,
-        (b.ubicacion || "N/A").toUpperCase(),
-        b.fecha_registro ? new Date(b.fecha_registro).toLocaleDateString() : "N/A"
+        clipPdfText((b.ubicacion || "N/A").toUpperCase(), heavy ? 20 : 28),
+        b.fecha_registro ? new Date(b.fecha_registro).toLocaleDateString() : "N/A",
       ]);
+
+      await yieldToMain();
 
       doc.autoTable({
         startY: 80,
         head: [tableColumn],
         body: tableRows,
-        theme: 'grid',
-        headStyles: { fillColor: [37, 99, 235], fontSize: 8 },
-        bodyStyles: { fontSize: 7 }
+        theme: heavy ? "plain" : "grid",
+        styles: { font: "helvetica", lineWidth: heavy ? 0 : 0.08 },
+        headStyles: {
+          fillColor: [37, 99, 235],
+          textColor: [255, 255, 255],
+          fontSize: heavy ? 6 : 7,
+          cellPadding: heavy ? 0.9 : 1.2,
+        },
+        bodyStyles: {
+          fontSize: heavy ? 5.5 : 6.5,
+          cellPadding: heavy ? 0.7 : 1.2,
+        },
+        margin: { left: 14, right: 14 },
       });
 
       doc.save(`Reporte_Inventario_General_${new Date().toISOString().split('T')[0]}.pdf`);
     } catch (err) {
       console.error("Error generating PDF:", err);
       alert("No se pudo generar el reporte detallado.");
+    } finally {
+      setPdfLoading(false);
     }
   };
 
@@ -164,10 +197,12 @@ export default function Reportes() {
             <p className="text-slate-500 font-medium italic">Análisis en tiempo real del inventario institucional</p>
           </div>
           <Button 
-            onClick={downloadGeneralStockPDF}
+            onClick={() => void downloadGeneralStockPDF()}
+            disabled={pdfLoading || !stats}
             className="bg-blue-600 hover:bg-blue-500 h-12 rounded-2xl px-6 font-bold shadow-lg shadow-blue-600/20"
           >
-            <Download className="w-4 h-4 mr-2" /> Descargar Stock PDF
+            <Download className="w-4 h-4 mr-2" />{" "}
+            {pdfLoading ? "Generando PDF…" : "Descargar Stock PDF"}
           </Button>
         </div>
 
@@ -192,7 +227,9 @@ export default function Reportes() {
               <MapPin className="w-16 h-16" />
             </div>
             <span className="text-xs font-black text-slate-500 uppercase tracking-widest">Oficinas Activas</span>
-            <div className="text-4xl font-black mt-2 text-indigo-500">{stats?.byOficina?.length || 0}</div>
+            <div className="text-4xl font-black mt-2 text-indigo-500">
+              {stats?.summary?.oficinasActivas ?? stats?.byOficina?.length ?? 0}
+            </div>
           </div>
         </div>
 
@@ -204,29 +241,34 @@ export default function Reportes() {
               <PieIcon className="w-5 h-5 text-purple-500" />
               Distribución por Oficina (Top 5)
             </h3>
-            <div className="h-[300px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie
-                    data={stats?.byOficina}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={60}
-                    outerRadius={100}
-                    paddingAngle={5}
-                    dataKey="value"
-                  >
-                    {stats?.byOficina?.map((entry: any, index: number) => (
-                      <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                    ))}
-                  </Pie>
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
-                    itemStyle={{ color: '#fff' }}
-                  />
-                  <Legend />
-                </PieChart>
-              </ResponsiveContainer>
+            <div className="h-[300px] w-full grid place-items-center">
+              {stats?.byOficina?.length ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={stats.byOficina}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={60}
+                      outerRadius={100}
+                      paddingAngle={5}
+                      dataKey="value"
+                      nameKey="name"
+                    >
+                      {stats.byOficina.map((entry: any, index: number) => (
+                        <Cell key={`cell-${entry.name}-${index}`} fill={COLORS[index % COLORS.length]} />
+                      ))}
+                    </Pie>
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
+                      itemStyle={{ color: '#fff' }}
+                    />
+                    <Legend />
+                  </PieChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-slate-500 px-4 text-center">Sin datos de distribución por oficina.</p>
+              )}
             </div>
           </div>
 
@@ -236,26 +278,32 @@ export default function Reportes() {
               <Calendar className="w-5 h-5 text-blue-500" />
               Tendencia de Registro Mensual
             </h3>
-            <div className="h-[300px] w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={stats?.byMonth}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
-                  <XAxis dataKey="month" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                  <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
-                    itemStyle={{ color: '#fff' }}
-                  />
-                  <Line 
-                    type="monotone" 
-                    dataKey="total" 
-                    stroke="#3b82f6" 
-                    strokeWidth={4} 
-                    dot={{ fill: '#3b82f6', r: 6 }} 
-                    activeDot={{ r: 8, strokeWidth: 0 }} 
-                  />
-                </LineChart>
-              </ResponsiveContainer>
+            <div className="h-[300px] w-full grid place-items-center">
+              {stats?.byMonth?.length ? (
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={stats.byMonth}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
+                    <XAxis dataKey="month" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                    <YAxis stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #1e293b', borderRadius: '12px' }}
+                      itemStyle={{ color: '#fff' }}
+                    />
+                    <Line 
+                      type="monotone" 
+                      dataKey="total" 
+                      stroke="#3b82f6" 
+                      strokeWidth={4} 
+                      dot={{ fill: '#3b82f6', r: 6 }} 
+                      activeDot={{ r: 8, strokeWidth: 0 }} 
+                    />
+                  </LineChart>
+                </ResponsiveContainer>
+              ) : (
+                <p className="text-sm text-slate-500 px-4 text-center">
+                  No hay serie temporal: la tabla de bienes no tiene columna de fecha reconocida.
+                </p>
+              )}
             </div>
           </div>
         </div>
