@@ -1,35 +1,64 @@
-# Guía de Instalación y Uso - QR Inventario
+# Guía Completa de Instalación y Configuración - QR Inventario
 
-Esta guía detalla los pasos necesarios para configurar, instalar y ejecutar la aplicación de gestión de inventario con códigos QR.
-
-## 📋 Requisitos Previos
-
-Antes de comenzar, asegúrate de tener instalado lo siguiente:
-
-1.  **Node.js** (Versión 18 o superior)
-2.  **PNPM** (Recomendado: `npm install -g pnpm`)
-3.  **Laragon** (o un servidor MySQL local)
-4.  **ngrok** (Opcional, para acceso externo)
+Esta guía proporciona instrucciones detalladas para instalar todas las herramientas necesarias y configurar el proyecto desde cero.
 
 ---
 
-## 🚀 Configuración Paso a Paso
+## 🛠️ 1. Instalación de Herramientas (Software Base)
 
-### 1. Clonar o Descargar el Proyecto
-Si aún no lo tienes localmente:
+Asegúrate de instalar cada uno de estos componentes en el orden indicado:
+
+### A. Git (Control de Versiones)
+1. Descárgalo desde [git-scm.com](https://git-scm.com/).
+2. Sigue el instalador (puedes dejar las opciones por defecto).
+3. Verifica en la terminal con: `git --version`.
+
+### B. Node.js (Entorno de Ejecución)
+1. Descarga la versión **LTS** (Recomendada) desde [nodejs.org](https://nodejs.org/).
+2. Instala y verifica con: `node -v`.
+
+### C. PNPM (Gestor de Paquetes)
+Una vez instalado Node.js, abre una terminal y ejecuta:
+```bash
+npm install -g pnpm
+```
+Verifica con: `pnpm -v`.
+
+### D. Laragon (Servidor Local y MySQL)
+1. Descarga **Laragon Full** desde [laragon.org](https://laragon.org/download/).
+2. Instálalo (preferiblemente en `C:\laragon`).
+3. Esto instalará automáticamente **MySQL**, **PHP** y **Apache**.
+
+### E. Android Studio & Java (Para la App Móvil)
+1. Descarga e instala [Android Studio](https://developer.android.com/studio).
+2. Durante la instalación, asegúrate de instalar el **Android SDK** y el **Android SDK Platform-Tools**.
+3. Instala el **Java JDK 17** (necesario para Android): [Descargar JDK 17](https://www.oracle.com/java/technologies/javase/jdk17-archive-downloads.html).
+
+---
+
+## 🚀 2. Configuración del Proyecto
+
+### Paso 1: Obtener el Código
+Abre una terminal (o Git Bash) y clona el repositorio:
 ```bash
 git clone https://github.com/descarga12/pro.git
 cd pro
 ```
 
-### 2. Configuración de la Base de Datos
-1.  Inicia **Laragon** y pulsa en **"Start All"**.
-2.  Accede a tu gestor de base de datos (HeidiSQL, phpMyAdmin, etc.).
-3.  Crea una base de datos llamada `prueba`.
-4.  (Opcional) El sistema intentará crear las tablas automáticamente al iniciar, pero asegúrate de tener los permisos de `root` sin contraseña (según la configuración por defecto).
+### Paso 2: Instalar Dependencias del Proyecto
+Dentro de la carpeta del proyecto, ejecuta:
+```bash
+pnpm install
+```
 
-### 3. Variables de Entorno
-Crea un archivo `.env` en la raíz del proyecto (puedes copiar el `.env.example` si existe):
+### Paso 3: Configurar la Base de Datos
+1. Abre **Laragon** y haz clic en **"Start All"**.
+2. Haz clic en el botón **"Database"** (HeidiSQL).
+3. Crea una nueva base de datos llamada `prueba`.
+4. El usuario por defecto es `root` y la contraseña está vacía.
+
+### Paso 4: Archivo de Configuración (.env)
+Crea un archivo llamado `.env` en la raíz del proyecto con este contenido:
 ```env
 DB_HOST=localhost
 DB_PORT=3306
@@ -38,61 +67,50 @@ DB_PASS=
 DB_NAME=prueba
 ```
 
-### 4. Instalación de Dependencias
-Ejecuta el siguiente comando en la terminal:
-```bash
-pnpm install
-```
-
 ---
 
-## 💻 Ejecución de la Aplicación
+## 💻 3. Cómo Ejecutar la Aplicación
 
-### Modo Desarrollo
-Para iniciar el servidor de frontend y el backend simultáneamente con recarga automática:
+### Servidor de Desarrollo (Web)
+Para iniciar la aplicación (Frontend + Backend):
 ```bash
 pnpm dev
 ```
-La aplicación estará disponible en: [http://localhost:3000](http://localhost:3000)
+Acceso: [http://localhost:3000](http://localhost:3000)
 
-### Acceso Externo (ngrok)
-Si necesitas que la aplicación sea accesible desde un celular u otra red:
-1.  Abre una nueva terminal.
-2.  Ejecuta:
-    ```bash
-    ngrok http 3000
-    ```
-3.  Usa la URL `https://...` generada por ngrok.
+### Acceso desde Celular (ngrok)
+Si quieres probar la cámara del celular o entrar desde internet:
+1. Instala ngrok: `pnpm install -g ngrok` (o descárgalo de [ngrok.com](https://ngrok.com/)).
+2. Ejecuta: `ngrok http 3000`.
+3. Usa la URL `https://...` que te proporcione ngrok.
 
 ---
 
-## 📱 Uso en Android (Capacitor)
+## 📱 4. Generar la Aplicación Android (.APK)
 
-El proyecto está configurado para generar una aplicación nativa.
-
-1.  **Sincronizar cambios**:
-    ```bash
-    pnpm run cap:sync
-    ```
-2.  **Abrir en Android Studio**:
-    ```bash
-    pnpm run cap:open:android
-    ```
-3.  **Generar APK**:
-    Puedes usar los scripts en la carpeta `tools/apk/` o desde Android Studio (Build > Build Bundle(s) / APK(s) > Build APK(s)).
-
----
-
-## 🛠️ Comandos Útiles
-
-- `pnpm build`: Genera la versión de producción.
-- `pnpm start`: Inicia el servidor de producción (requiere build previo).
-- `pnpm typecheck`: Verifica errores de TypeScript.
-- `node scripts/test-db-connection.js`: Prueba si la conexión a la base de datos es correcta.
+1. **Sincronizar Capacitor**:
+   ```bash
+   pnpm run cap:sync
+   ```
+2. **Abrir en Android Studio**:
+   ```bash
+   pnpm run cap:open:android
+   ```
+3. **Generar APK**:
+   - En Android Studio: `Build` > `Build Bundle(s) / APK(s)` > `Build APK(s)`.
+   - El archivo se generará en: `android/app/build/outputs/apk/debug/app-debug.apk`.
 
 ---
 
-## 💡 Notas Importantes
-- Asegúrate de que **Laragon/MySQL** esté siempre iniciado antes de abrir la aplicación.
-- Si cambias la estructura de la base de datos, revisa el archivo `server/lib/db.ts`.
-- Los archivos subidos (imágenes) se guardan en la carpeta `public/uploads/`.
+## � 5. Solución de Problemas Comunes
+
+- **Error "ECONNREFUSED"**: MySQL no está iniciado en Laragon. Dale a "Start All".
+- **Error "Permission Denied (publickey)"**: Usa la URL HTTPS para Git o configura tus llaves SSH en GitHub.
+- **La cámara no abre**: Asegúrate de estar usando una conexión segura (`https`) a través de ngrok o localhost.
+
+---
+
+## �️ Comandos de Mantenimiento
+- `pnpm build`: Prepara la app para producción.
+- `node scripts/test-db-connection.js`: Verifica si el servidor llega a la base de datos.
+- `pnpm typecheck`: Busca errores en el código TypeScript.
