@@ -38,8 +38,12 @@ export default defineConfig({
         entryFileNames: "[name].mjs",
       },
     },
-    minify: false, // Keep readable for debugging
-    sourcemap: true,
+    minify: "esbuild",
+    sourcemap: false,
+  },
+  esbuild: {
+    keepNames: true,
+    drop: ["console", "debugger"],
   },
   resolve: {
     alias: {

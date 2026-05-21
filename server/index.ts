@@ -6,28 +6,31 @@ import path from "path";
 import { createApiRouter } from "./routes/api-router";
 
 /**
- * Construye la app Express con:
- * - middlewares globales (CORS, body parser, estáticos)
- * - rutas API
- * - fallback SPA para React Router
+ * SERVIDOR EXPRESS PRINCIPAL
+ * Este archivo configura el núcleo del backend de la aplicación.
+ * Define middlewares globales, manejo de CORS, compresión y rutas de la API.
  */
 export function createServer() {
   const app = express();
 
+  // Middleware de compresión: reduce el tamaño de las respuestas HTTP
   app.use(
     compression({
-      level: 9,
-      threshold: 256,
+      level: 9, // Máximo nivel de compresión
+      threshold: 256, // Solo comprime respuestas mayores a 256 bytes
     })
   );
 
-  // CORS
-  // Nota: 'cors' NO soporta wildcards tipo "https://*.ngrok-free.dev" en arrays.
-  // Usamos una función para permitir ngrok + localhost + capacitor.
+  /**
+   * CONFIGURACIÓN DE CORS (Cross-Origin Resource Sharing)
+   * Permite que la app frontend (Capacitor, localhost o Ngrok) se comunique con esta API.
+   */
   app.use(cors({
     origin: (origin, cb) => {
-      if (!origin) return cb(null, true); // curl / apps nativas
+      // Permite peticiones sin origen (como curl o apps móviles nativas)
+      if (!origin) return cb(null, true);
 
+      // Lista de orígenes permitidos (Local, Red local, Capacitor y Ngrok)
       const isLocal =
         origin.startsWith("http://localhost") ||
         origin.startsWith("http://127.0.0.1") ||
@@ -51,26 +54,37 @@ export function createServer() {
     },
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "ngrok-skip-browser-warning"],
-    credentials: true,
+    credentials: true, // Permite envío de cookies y headers de autorización
   }));
+
+  // Parseadores de cuerpo de petición (JSON y Formularios)
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
+
+  // Directorio para archivos subidos por el usuario
   app.use(express.static(path.join(process.cwd(), "public")));
-  // Serve SPA static files from dist/spa
+  
+  // Servir los archivos compilados del frontend (React SPA)
   app.use(express.static(path.join(process.cwd(), "dist", "spa")));
 
+  // Montar las rutas de la API bajo el prefijo /api
   app.use("/api", createApiRouter());
 
-  // SPA fallback - serve index.html for any non-API, non-file route
+  /**
+   * MANEJO DE RUTAS SPA (Single Page Application)
+   * Cualquier ruta que no sea de la API ni un archivo estático, 
+   * devuelve el index.html para que React Router tome el control.
+   */
   app.use((req, res, next) => {
-    // Skip API routes
+    // Si es una ruta de API, continuar (si llegó aquí es un 404 de API)
     if (req.path === "/api" || req.path.startsWith("/api/")) {
       return next();
     }
-    // Skip static files (routes with file extensions like .js, .css, .png, etc.)
+    // Si la ruta parece un archivo (tiene extensión), continuar
     if (req.path.match(/\.[^/]+$/)) {
       return next();
     }
+    // Enviar el archivo principal del frontend
     res.sendFile(path.join(process.cwd(), "dist", "spa", "index.html"));
   });
 

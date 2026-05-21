@@ -1,0 +1,39 @@
+services:
+  # Servicio de Base de Datos (MySQL)
+  db:
+    image: mysql:8.0
+    container_name: qrinventario_db
+    restart: always
+    environment:
+      MYSQL_DATABASE: inventory_db
+      MYSQL_ROOT_PASSWORD: root_password # Cambia esto por algo más seguro
+      MYSQL_USER: user_inventory
+      MYSQL_PASSWORD: user_password
+    ports:
+      - "3307:3306" # Puerto externo 3307 para no chocar con Laragon local
+    volumes:
+      - db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin" ,"ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  # Servicio de la Aplicación (Frontend + Backend)
+  app:
+    build: .
+    container_name: qrinventario_app
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=mysql://user_inventory:user_password@db:3306/inventory_db
+      - NODE_ENV=production
+      - PORT=3000
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./public/uploads:/app/public/uploads # Persistencia de imágenes subidas
+
+volumes:
+  db_data:

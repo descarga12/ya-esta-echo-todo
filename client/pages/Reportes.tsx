@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { API_BASE_URL, getApiHeaders } from "@/lib/api-config";
 import { 
   BarChart, 
@@ -32,6 +32,7 @@ import {
   clipPdfText,
   isHeavyPdfRowCount,
 } from "@/lib/pdf-utils";
+import { downloadBienesCSV } from "@/lib/excel-utils";
 
 const COLORS = ['#2563eb', '#7c3aed', '#db2777', '#ea580c', '#16a34a'];
 
@@ -47,6 +48,7 @@ export default function Reportes() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const pdfLoadingRef = useRef(false);
 
   useEffect(() => {
     const baseUrl = API_BASE_URL || window.location.origin;
@@ -72,16 +74,25 @@ export default function Reportes() {
       });
   }, []);
 
-  const downloadGeneralStockPDF = async () => {
-    if (!stats || pdfLoading) return;
+  const downloadGeneralStockPDF = useCallback(async () => {
+    if (!stats || pdfLoadingRef.current) return;
 
+    pdfLoadingRef.current = true;
     setPdfLoading(true);
     try {
       const baseUrl = API_BASE_URL || window.location.origin;
       const res = await fetch(`${baseUrl}/api/bienes`, {
         headers: getApiHeaders()
       });
-      const bienes = await res.json();
+      const data = await res.json();
+      const bienes = Array.isArray(data) ? data : [];
+
+      if (bienes.length === 0) {
+        alert("No hay bienes para exportar en este momento.");
+        pdfLoadingRef.current = false;
+        setPdfLoading(false);
+        return;
+      }
 
       await yieldToMain();
 
@@ -93,11 +104,13 @@ export default function Reportes() {
       doc.setFontSize(22);
       doc.setTextColor(37, 99, 235);
       doc.setFont("helvetica", "bold");
-      doc.text("SBH", 38, 20);
+      doc.text("DSFD", 38, 20); // Cambiado SBH por DSFD para consistencia
       doc.setFontSize(10);
       doc.setTextColor(100);
       doc.text("Reporte General de Stock e Inventario", 38, 26);
       
+      doc.setDrawColor(37, 99, 235);
+      doc.setLineWidth(0.5);
       doc.line(14, 35, 196, 35);
       
       doc.setTextColor(0);
@@ -106,24 +119,41 @@ export default function Reportes() {
       
       // Stats Summary in PDF
       doc.setFontSize(10);
-      doc.text(`Total de Bienes Únicos: ${stats.summary.total}`, 14, 55);
-      doc.text(
-        `Stock Total Acumulado: ${stats.summary.stockTotal ?? "—"}`,
-        14,
-        62
-      );
-      doc.text(`Fecha de Emisión: ${new Date().toLocaleDateString()}`, 14, 69);
+      doc.setFont("helvetica", "bold");
+      doc.text(`Total de Bienes Únicos:`, 14, 55);
+      doc.setFont("helvetica", "normal");
+      doc.text(String(stats?.summary?.total || 0), 60, 55);
+
+      doc.setFont("helvetica", "bold");
+      doc.text(`Stock Total Acumulado:`, 14, 62);
+      doc.setFont("helvetica", "normal");
+      doc.text(String(stats?.summary?.stockTotal ?? "—"), 60, 62);
+
+      doc.setFont("helvetica", "bold");
+      doc.text(`Fecha de Emisión:`, 14, 69);
+      doc.setFont("helvetica", "normal");
+      doc.text(new Date().toLocaleDateString(), 60, 69);
 
       // Table of all items
       const tableColumn = ["CÓDIGO/SKU", "DENOMINACIÓN", "CANT.", "UBICACIÓN", "REGISTRO"];
-      const heavy = isHeavyPdfRowCount(Array.isArray(bienes) ? bienes.length : 0);
-      const tableRows = bienes.map((b: any) => [
-        clipPdfText(b.sku || "N/A", 16),
-        clipPdfText((b.nombre || "Sin nombre").toUpperCase(), heavy ? 30 : 42),
-        b.cantidad || 0,
-        clipPdfText((b.ubicacion || "N/A").toUpperCase(), heavy ? 20 : 28),
-        b.fecha_registro ? new Date(b.fecha_registro).toLocaleDateString() : "N/A",
-      ]);
+      const heavy = isHeavyPdfRowCount(bienes.length);
+      const tableRows = bienes.map((b: any) => {
+        let fecha = "N/A";
+        try {
+          if (b.fecha_registro) {
+            const d = new Date(b.fecha_registro);
+            if (!isNaN(d.getTime())) fecha = d.toLocaleDateString();
+          }
+        } catch { /* ignore */ }
+
+        return [
+          clipPdfText(b.sku || "N/A", 16),
+          clipPdfText((b.nombre || "Sin nombre").toUpperCase(), heavy ? 30 : 42),
+          b.cantidad || 0,
+          clipPdfText((b.ubicacion || "N/A").toUpperCase(), heavy ? 20 : 28),
+          fecha,
+        ];
+      });
 
       await yieldToMain();
 
@@ -151,9 +181,25 @@ export default function Reportes() {
       console.error("Error generating PDF:", err);
       alert("No se pudo generar el reporte detallado.");
     } finally {
+      pdfLoadingRef.current = false;
       setPdfLoading(false);
     }
-  };
+  }, [stats]);
+
+  const downloadGeneralExcel = useCallback(async () => {
+    if (!stats) return;
+    try {
+      const baseUrl = API_BASE_URL || window.location.origin;
+      const res = await fetch(`${baseUrl}/api/bienes`, {
+        headers: getApiHeaders()
+      });
+      const bienes = await res.json();
+      downloadBienesCSV("General", bienes);
+    } catch (err) {
+      console.error("Error generating Excel:", err);
+      alert("No se pudo generar el reporte de Excel.");
+    }
+  }, [stats]);
 
   if (loading) {
     return (
@@ -196,14 +242,24 @@ export default function Reportes() {
             </h1>
             <p className="text-slate-500 font-medium italic">Análisis en tiempo real del inventario institucional</p>
           </div>
-          <Button 
-            onClick={() => void downloadGeneralStockPDF()}
-            disabled={pdfLoading || !stats}
-            className="bg-blue-600 hover:bg-blue-500 h-12 rounded-2xl px-6 font-bold shadow-lg shadow-blue-600/20"
-          >
-            <Download className="w-4 h-4 mr-2" />{" "}
-            {pdfLoading ? "Generando PDF…" : "Descargar Stock PDF"}
-          </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button 
+              onClick={() => void downloadGeneralStockPDF()}
+              disabled={pdfLoading || !stats}
+              className="bg-blue-600 hover:bg-blue-500 h-12 rounded-2xl px-6 font-bold shadow-lg shadow-blue-600/20"
+            >
+              <Download className="w-4 h-4 mr-2" />{" "}
+              {pdfLoading ? "Generando PDF…" : "Descargar Stock PDF"}
+            </Button>
+            <Button 
+              onClick={() => void downloadGeneralExcel()}
+              disabled={!stats}
+              className="bg-emerald-600 hover:bg-emerald-500 h-12 rounded-2xl px-6 font-bold shadow-lg shadow-emerald-600/20"
+            >
+              <Package className="w-4 h-4 mr-2" />{" "}
+              Descargar Excel
+            </Button>
+          </div>
         </div>
 
         {/* KPIs */}
@@ -241,9 +297,9 @@ export default function Reportes() {
               <PieIcon className="w-5 h-5 text-purple-500" />
               Distribución por Oficina (Top 5)
             </h3>
-            <div className="h-[300px] w-full grid place-items-center">
+            <div className="relative h-[300px] w-full">
               {stats?.byOficina?.length ? (
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" debounce={100}>
                   <PieChart>
                     <Pie
                       data={stats.byOficina}
@@ -267,20 +323,22 @@ export default function Reportes() {
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
-                <p className="text-sm text-slate-500 px-4 text-center">Sin datos de distribución por oficina.</p>
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-sm text-slate-500 px-4 text-center">Sin datos de distribución por oficina.</p>
+                </div>
               )}
             </div>
           </div>
 
-          {/* Tendencia de Registro */}
+          {/* Tendencia de Registro Mensual */}
           <div className="bg-slate-900/50 border border-slate-800 p-8 rounded-3xl backdrop-blur space-y-6">
             <h3 className="text-lg font-black uppercase tracking-wider flex items-center gap-2">
               <Calendar className="w-5 h-5 text-blue-500" />
               Tendencia de Registro Mensual
             </h3>
-            <div className="h-[300px] w-full grid place-items-center">
+            <div className="relative h-[300px] w-full">
               {stats?.byMonth?.length ? (
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height="100%" debounce={100}>
                   <LineChart data={stats.byMonth}>
                     <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" vertical={false} />
                     <XAxis dataKey="month" stroke="#64748b" fontSize={12} tickLine={false} axisLine={false} />
@@ -300,9 +358,11 @@ export default function Reportes() {
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
-                <p className="text-sm text-slate-500 px-4 text-center">
-                  No hay serie temporal: la tabla de bienes no tiene columna de fecha reconocida.
-                </p>
+                <div className="flex items-center justify-center h-full">
+                  <p className="text-sm text-slate-500 px-4 text-center">
+                    No hay serie temporal: la tabla de bienes no tiene columna de fecha reconocida.
+                  </p>
+                </div>
               )}
             </div>
           </div>

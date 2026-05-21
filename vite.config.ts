@@ -4,10 +4,14 @@ import path from "path";
 import { createServer } from "./server";
 import compression from "vite-plugin-compression";
 
-// https://vitejs.dev/config/
+/**
+ * CONFIGURACIÓN DE VITE
+ * Este archivo define cómo se compila y sirve la aplicación tanto en desarrollo como en producción.
+ */
 export default defineConfig(({ mode }) => ({
+  // Configuración del servidor de desarrollo
   server: {
-    host: "0.0.0.0",
+    host: "0.0.0.0", // Permite acceso desde otros dispositivos en la red
     port: 3000,
     allowedHosts: true,
     fs: {
@@ -15,64 +19,60 @@ export default defineConfig(({ mode }) => ({
       deny: [".env", ".env.*", "*.{crt,pem}", "**/.git/**"],
     },
   },
+  
+  // Optimización de la construcción (Minificación)
+  esbuild: {
+    // Elimina console.log y debugger en producción para que la app sea más rápida y privada
+    drop: mode === 'production' ? ['console', 'debugger'] : [],
+    // Mantiene los nombres de las funciones para evitar errores de ejecución
+    keepNames: true,
+  },
+
   build: {
-    outDir: "dist/spa",
+    outDir: "dist/spa", // Directorio de salida para la aplicación web
     emptyOutDir: true,
-    minify: "terser",
-    terserOptions: {
-      compress: {
-        drop_console: true,
-        drop_debugger: true,
-        pure_funcs: ["console.log", "console.info", "console.debug", "console.warn"],
-        passes: 3,
-        toplevel: true,
-        dead_code: true,
-        unused: true,
-      },
-      mangle: {
-        toplevel: true,
-      },
-      format: {
-        comments: false,
-      },
-    },
-    cssCodeSplit: true,
+    assetsInlineLimit: 4096, // Convierte archivos pequeños a Base64 para ahorrar peticiones HTTP
+    minify: "esbuild", // Algoritmo de compresión ultra rápido
+    cssCodeSplit: true, // Separa el CSS por cada página para carga bajo demanda
     cssMinify: true,
     reportCompressedSize: false,
-    chunkSizeWarningLimit: 800,
+    chunkSizeWarningLimit: 2000,
+    
+    // Configuración avanzada de Rollup para dividir el código en "chunks"
     rollupOptions: {
       output: {
-        manualChunks(id) {
-          if (id.includes("node_modules") || id.includes(".pnpm")) {
-            const name = id.toString();
-            if (name.includes("react") || name.includes("scheduler") || name.includes("react-dom") || name.includes("react-router")) return "vendor-react";
-            if (name.includes("radix-ui")) return "vendor-radix";
-            if (name.includes("tanstack")) return "vendor-query";
-            if (name.includes("lucide")) return "vendor-ui";
-            if (name.includes("recharts") || name.includes("d3")) return "vendor-charts";
-            if (name.includes("jspdf") || name.includes("canvg") || name.includes("html2canvas")) return "vendor-pdf";
-            if (name.includes("html5-qrcode")) return "vendor-qr";
-            if (name.includes("date-fns")) return "vendor-date";
-            if (name.includes("zod")) return "vendor-zod";
-            if (name.includes("embla-carousel") || name.includes("vaul") || name.includes("cmdk")) return "vendor-components";
-            return "vendor-misc";
-          }
-        },
+        chunkFileNames: 'assets/js/[name]-[hash].js',
+        entryFileNames: 'assets/js/[name]-[hash].js',
+        assetFileNames: 'assets/[ext]/[name]-[hash].[ext]',
+        // Agrupa librerías pesadas en archivos separados para mejorar el rendimiento
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-ui': ['lucide-react'],
+        }
       },
     },
   },
+
   plugins: [
-    react(), 
-    expressPlugin(),
+    react(), // Soporte para React con el compilador SWC (muy rápido)
+    expressPlugin(), // Integra el servidor backend Express con Vite
+    
+    // Compresión GZIP para archivos web (ahorra ancho de banda)
     compression({
       algorithm: 'gzip',
       ext: '.gz',
+      disable: mode === 'production' && !!process.env.CAPACITOR_BUILD
     }),
+    
+    // Compresión BROTLI (más eficiente que GZIP para navegadores modernos)
     compression({
       algorithm: 'brotliCompress',
       ext: '.br',
+      disable: mode === 'production' && !!process.env.CAPACITOR_BUILD
     })
   ],
+
+  // Alias para rutas cortas (usar @/ en lugar de ../../../)
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./client"),
@@ -81,14 +81,17 @@ export default defineConfig(({ mode }) => ({
   },
 }));
 
+/**
+ * PLUGIN PERSONALIZADO PARA EXPRESS
+ * Permite que el backend de Express funcione dentro del mismo proceso que Vite en desarrollo.
+ */
 function expressPlugin(): Plugin {
   return {
     name: "express-plugin",
-    apply: "serve", // Only apply during development (serve mode)
+    apply: "serve", // Solo se aplica en modo desarrollo
     configureServer(server) {
       const app = createServer();
-
-      // Add Express app as middleware to Vite dev server
+      // Inyecta Express como middleware en el servidor de Vite
       server.middlewares.use(app);
     },
   };

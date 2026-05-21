@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  '@zxing/library': ^0.21.3
+
 importers:
 
   .:
@@ -20,6 +23,9 @@ importers:
       '@capacitor/core':
         specifier: ^5.0.0
         version: 5.7.8
+      '@zxing/library':
+        specifier: ^0.21.3
+        version: 0.21.3
       bcryptjs:
         specifier: ^3.0.3
         version: 3.0.3
@@ -1534,10 +1540,10 @@ packages:
   '@zxing/browser@0.1.5':
     resolution: {integrity: sha512-4Lmrn/il4+UNb87Gk8h1iWnhj39TASEHpd91CwwSJtY5u+wa0iH9qS0wNLAWbNVYXR66WmT5uiMhZ7oVTrKfxw==}
     peerDependencies:
-      '@zxing/library': ^0.21.0
+      '@zxing/library': ^0.21.3
 
-  '@zxing/library@0.20.0':
-    resolution: {integrity: sha512-6Ev6rcqVjMakZFIDvbUf0dtpPGeZMTfyxYg4HkVWioWeN7cRcnUWT3bU6sdohc82O1nPXcjq6WiGfXX2Pnit6A==}
+  '@zxing/library@0.21.3':
+    resolution: {integrity: sha512-hZHqFe2JyH/ZxviJZosZjV+2s6EDSY0O24R+FQmlWZBZXP9IqMo7S3nb3+2LBWxodJQkSurdQGnqE7KXqrYgow==}
     engines: {node: '>= 10.4.0'}
 
   '@zxing/text-encoding@0.9.0':
@@ -3279,8 +3285,8 @@ snapshots:
   '@capacitor-community/barcode-scanner@4.0.1(@capacitor/core@5.7.8)':
     dependencies:
       '@capacitor/core': 5.7.8
-      '@zxing/browser': 0.1.5(@zxing/library@0.20.0)
-      '@zxing/library': 0.20.0
+      '@zxing/browser': 0.1.5(@zxing/library@0.21.3)
+      '@zxing/library': 0.21.3
 
   '@capacitor/android@5.7.8(@capacitor/core@5.7.8)':
     dependencies:
@@ -4532,13 +4538,13 @@ snapshots:
 
   '@xmldom/xmldom@0.8.11': {}
 
-  '@zxing/browser@0.1.5(@zxing/library@0.20.0)':
+  '@zxing/browser@0.1.5(@zxing/library@0.21.3)':
     dependencies:
-      '@zxing/library': 0.20.0
+      '@zxing/library': 0.21.3
     optionalDependencies:
       '@zxing/text-encoding': 0.9.0
 
-  '@zxing/library@0.20.0':
+  '@zxing/library@0.21.3':
     dependencies:
       ts-custom-error: 3.3.1
     optionalDependencies:

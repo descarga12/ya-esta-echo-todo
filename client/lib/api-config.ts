@@ -18,15 +18,13 @@ const hasCapacitorObject = typeof capacitor !== "undefined";
 const isCapacitorOrigin = origin.startsWith('capacitor://') || origin.startsWith('ionic://');
 const isLocalhostOrigin = origin.startsWith('http://localhost') || origin.startsWith('https://localhost');
 const hasCapacitorUserAgent = /Capacitor|cordova|ionic/i.test(userAgent);
-const isNgrokWeb = origin.includes(".ngrok-free.app") || origin.includes(".ngrok-free.dev") || origin.includes(".ngrok.io");
 const isNativePlatform = !!(hasCapacitorObject && typeof capacitor.isNativePlatform === "function" && capacitor.isNativePlatform());
-const isCapacitor = !isNgrokWeb && (
+const isCapacitor = 
   isNativePlatform ||
   isCapacitorOrigin ||
   (isLocalhostOrigin && hasCapacitorUserAgent) ||
   window.location.protocol === 'capacitor:' ||
-  (window.location.protocol === 'file:' && hasCapacitorUserAgent)
-);
+  (window.location.protocol === 'file:' && hasCapacitorUserAgent);
 
 // Lógica de URL Base
 // 1. Prioridad: URL guardada manualmente por el usuario en el app (para no re-generar APK)
@@ -39,20 +37,11 @@ export const API_BASE_URL = isCapacitor
 
 /**
  * Encabezados comunes para todas las peticiones API.
- * Incluye el skip-browser-warning para ngrok.
  */
 export const getApiHeaders = (extraHeaders: Record<string, string> = {}) => {
-  const headers: Record<string, string> = {
+  return {
     ...extraHeaders
   };
-
-  // Si estamos usando una URL de ngrok (túnel), añadimos el header para saltar la advertencia
-  const currentUrl = API_BASE_URL || window.location.origin;
-  if (currentUrl.includes('ngrok') || window.location.hostname.includes('ngrok')) {
-    headers['ngrok-skip-browser-warning'] = 'true';
-  }
-
-  return headers;
 };
 
 console.log(`[API Config] Modo: ${isCapacitor ? 'Móvil (Capacitor)' : 'Web'}`);

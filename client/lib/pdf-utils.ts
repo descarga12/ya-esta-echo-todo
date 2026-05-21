@@ -16,8 +16,27 @@ const JSPDF_COMPRESS_OPTS = {
 /** Carga jsPDF + plugin solo cuando se genera un PDF (reduce JS inicial / APK). */
 export async function createCompressedJsPDF() {
   const { jsPDF } = await import("jspdf");
-  await import("jspdf-autotable");
-  return new (jsPDF as any)(JSPDF_COMPRESS_OPTS as any) as any;
+  const autoTableModule = await import("jspdf-autotable");
+  
+  // En algunos entornos ESM, el export puede estar en .default o ser el módulo mismo
+  const autoTableFn = autoTableModule.default || (autoTableModule as any);
+  
+  const doc = new (jsPDF as any)(JSPDF_COMPRESS_OPTS as any);
+  
+  // Evitamos recursión infinita si autoTable ya existe o si autoTableFn es doc.autoTable
+  if (typeof (doc as any).autoTable !== "function") {
+    (doc as any).autoTable = function (options: any) {
+      autoTableFn(this, options);
+      return this;
+    };
+  }
+  
+  return doc;
+}
+
+/** Helper para obtener el finalY de la última tabla de forma segura */
+function getLastAutoTableY(doc: any, fallbackY: number): number {
+  return doc.lastAutoTable?.finalY || fallbackY;
 }
 
 export async function generateUserBienesPDF(userName: string, userBienes: Bien[]) {
@@ -59,13 +78,27 @@ export async function generateUserBienesPDF(userName: string, userBienes: Bien[]
   doc.text(`${userBienes.length} unidades`, 55, 67);
 
   const tableColumn = ["CÓDIGO / SKU", "DENOMINACIÓN DEL BIEN", "CANT.", "OFICINA / UBICACIÓN", "REGISTRO"];
-  const tableRows = userBienes.map((bien) => [
-    clipPdfText(bien.sku || "N/A", 18),
-    clipPdfText((bien.nombre || "Sin nombre").toUpperCase(), heavy ? 32 : 44),
-    bien.cantidad || 0,
-    clipPdfText((bien.ubicacion || "OFICINA CENTRAL").toUpperCase(), heavy ? 22 : 30),
-    bien.fecha_registro ? new Date(bien.fecha_registro).toLocaleDateString() : "N/A",
-  ]);
+  const tableRows = userBienes.map((bien) => {
+    let fecha = "N/A";
+    try {
+      if (bien.fecha_registro) {
+        const d = new Date(bien.fecha_registro);
+        if (!isNaN(d.getTime())) {
+          fecha = d.toLocaleDateString();
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+
+    return [
+      clipPdfText(bien.sku || "N/A", 18),
+      clipPdfText((bien.nombre || "Sin nombre").toUpperCase(), heavy ? 32 : 44),
+      bien.cantidad || 0,
+      clipPdfText((bien.ubicacion || "OFICINA CENTRAL").toUpperCase(), heavy ? 22 : 30),
+      fecha,
+    ];
+  });
 
   doc.autoTable({
     startY: 75,
@@ -100,7 +133,7 @@ export async function generateUserBienesPDF(userName: string, userBienes: Bien[]
         }),
   });
 
-  const finalY = (doc as any).lastAutoTable.finalY + 30;
+  const finalY = getLastAutoTableY(doc, 75) + 30;
   if (finalY < 250) {
     doc.setDrawColor(150);
     doc.line(30, finalY, 80, finalY);
@@ -116,7 +149,7 @@ export async function generateUserBienesPDF(userName: string, userBienes: Bien[]
     doc.setFontSize(8);
     doc.setTextColor(150);
     doc.text(
-      `Documento generado por el Sistema de Inventario DSFD - Página ${i} de ${pageCount}`,
+      `Documento generado por el Sistema de Inventario de la sbh - Página ${i} de ${pageCount}`,
       105,
       285,
       { align: "center" }
@@ -161,14 +194,18 @@ export async function generateAlmacenPDF(products: Product[]) {
 
   const tableColumn = ["CÓDIGO", "DESCRIPCIÓN DEL PRODUCTO", "UND.", "STOCK", "COSTO UNIT.", "VALOR TOTAL"];
   const dec = heavy ? 1 : 2;
-  const tableRows = products.map((p) => [
-    clipPdfText(p.codigo || "N/A", 14),
-    clipPdfText((p.nombre || "Sin nombre").toUpperCase(), heavy ? 28 : 38),
-    clipPdfText((p.unidad || "UND").toUpperCase(), 6),
-    p.stock || 0,
-    `$${Number(p.costo_unit).toFixed(dec)}`,
-    `$${(Number(p.stock) * Number(p.costo_unit)).toFixed(dec)}`,
-  ]);
+  const tableRows = products.map((p) => {
+    const stock = Number(p.stock) || 0;
+    const costo = Number(p.costo_unit) || 0;
+    return [
+      clipPdfText(p.codigo || "N/A", 14),
+      clipPdfText((p.nombre || "Sin nombre").toUpperCase(), heavy ? 28 : 38),
+      clipPdfText((p.unidad || "UND").toUpperCase(), 6),
+      stock,
+      `$${costo.toFixed(dec)}`,
+      `$${(stock * costo).toFixed(dec)}`,
+    ];
+  });
 
   doc.autoTable({
     startY: 70,
@@ -200,7 +237,7 @@ export async function generateAlmacenPDF(products: Product[]) {
   });
 
   const totalValor = products.reduce((acc, p) => acc + Number(p.stock) * Number(p.costo_unit), 0);
-  const finalY = (doc as any).lastAutoTable.finalY + 10;
+  const finalY = getLastAutoTableY(doc, 70) + 10;
   doc.setFont("helvetica", "bold");
   doc.setFontSize(10);
   doc.text(`VALOR TOTAL DEL ALMACÉN: $${totalValor.toFixed(heavy ? 1 : 2)}`, 196, finalY, { align: "right" });
@@ -210,7 +247,7 @@ export async function generateAlmacenPDF(products: Product[]) {
     doc.setPage(i);
     doc.setFontSize(8);
     doc.setTextColor(150);
-    doc.text(`Reporte de Almacén DSFD - Página ${i} de ${pageCount}`, 105, 285, { align: "center" });
+    doc.text(`Reporte de Almacén de la sbh - Página ${i} de ${pageCount}`, 105, 285, { align: "center" });              
   }
 
   doc.save(`Reporte_Almacen_${new Date().toISOString().split("T")[0]}.pdf`);

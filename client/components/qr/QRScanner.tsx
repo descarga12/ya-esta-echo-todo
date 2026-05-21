@@ -88,11 +88,11 @@ export default function QRScanner({ onResult, onError, autoStart, buttonClassNam
       setLoading(true);
       setError(null);
 
-      // Html5Qrcode necesita que exista el div #qr-reader en el DOM antes de .start().
-      flushSync(() => {
-        setActive(true);
-      });
+      // Eliminamos flushSync para evitar problemas de profundidad de actualización de React.
+      // setActive(true) se procesará normalmente en el siguiente ciclo.
+      setActive(true);
 
+      // Esperamos un momento para que el DOM se actualice y el div #qr-reader esté disponible.
       await new Promise<void>((resolve) => {
         requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
       });
@@ -100,32 +100,40 @@ export default function QRScanner({ onResult, onError, autoStart, buttonClassNam
       try {
         await startWebScanner();
       } catch (webErr: any) {
-        await stopScanner();
+        // Solo detenemos si falló el web scanner y vamos a intentar el nativo
         if (isNative) {
           const value = await scanBarcodeNative();
           if (value) {
             onResult(value);
+            setActive(false);
             return;
           }
         }
+        await stopScanner();
         throw webErr;
       }
     } catch (err: any) {
       const errorMsg = err?.message || "No se pudo iniciar el escaneo de QR";
       setError(errorMsg);
       onError?.(new Error(errorMsg));
-      await stopScanner();
+      setActive(false);
     } finally {
       setLoading(false);
     }
   }, [isNative, onResult, onError, startWebScanner, stopScanner]);
 
   useEffect(() => {
-    if (autoStart) void start();
+    if (autoStart) {
+      void start();
+    }
+    // El cleanup del componente se encarga de detener el scanner si está activo
     return () => {
-      void stopScanner();
+      if (readerRef.current) {
+        void readerRef.current.stop().catch(() => {});
+        readerRef.current = null;
+      }
     };
-  }, [autoStart, start, stopScanner]);
+  }, [autoStart, start]); // Solo reiniciamos si cambia autoStart o la función start (que ahora es estable)
 
   return (
     <div className="w-full space-y-2">

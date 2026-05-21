@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useState, useMemo, useCallback } from "react";
 import { API_BASE_URL, getApiHeaders } from "../lib/api-config";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { 
@@ -107,11 +107,15 @@ export default function Almacen() {
     }
   };
 
-  const handleDeleteProduct = async (id: number) => {
+  const handleDeleteProduct = useCallback(async (id: number) => {
     if (confirm("¿Eliminar este producto?")) {
       await remove(id);
     }
-  };
+  }, [remove]);
+
+  const handleExportPDF = useCallback(() => {
+    void generateAlmacenPDF(filteredProducts);
+  }, [filteredProducts]);
 
   if (productsLoading && products.length === 0) {
     return (
@@ -140,7 +144,7 @@ export default function Almacen() {
               </div>
 
               <Button 
-                onClick={() => void generateAlmacenPDF(filteredProducts)}
+                onClick={handleExportPDF}
                 variant="outline"
                 className="bg-cyan-600/10 text-cyan-400 border-cyan-600/20 hover:bg-cyan-600/20 h-14 px-6 rounded-2xl gap-2 hidden md:flex"
               >

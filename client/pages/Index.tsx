@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState, useCallback, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -16,6 +16,7 @@ import { useAuth } from "@/lib/auth-context";
 import { useBienes, Bien, displayRegistranteNombre } from "@/hooks/use-bienes";
 import { useImageUpload } from "@/hooks/use-image-upload";
 import { generateUserBienesPDF } from "@/lib/pdf-utils";
+import { downloadBienesCSV } from "@/lib/excel-utils";
 import { API_BASE_URL, getApiHeaders } from "../lib/api-config";
 import { 
   Search, 
@@ -111,6 +112,12 @@ export default function Index() {
   const [showFilters, setShowFilters] = useState(false);
   const [reportUser, setReportUser] = useState<string>("all");
 
+  // Referencia para mantener onScan estable y evitar bucles infinitos en dispositivos móviles
+  const itemsRef = useRef(items);
+  useEffect(() => {
+    itemsRef.current = items;
+  }, [items]);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(UBICACIONES_CACHE_KEY);
@@ -183,21 +190,25 @@ export default function Index() {
     });
   }, [items, query, filterUnidad, filterCargo, filterUser]);
 
-  const onScan = (text: string) => {
+  const onScan = useCallback((text: string) => {
     setScanError(null);
     const suggestion = parseQR(text);
-    const existing = findBienByScan(items, text, suggestion);
+    // Usamos la referencia para evitar que el callback cambie y dispare re-renderizados del scanner
+    const existing = findBienByScan(itemsRef.current, text, suggestion);
     
     if (existing) {
       // Si el bien existe, lo buscamos en la interfaz filtrando por su SKU
       setQuery(existing.sku || existing.id);
-      // Opcional: podrías también abrir un detalle o hacer scroll hasta él.
     } else {
       // Si no existe, sugerimos crearlo
       setDraft({ cantidad: 1, ...suggestion });
       setOpen(true);
     }
-  };
+  }, []); // Dependencias vacías para estabilidad total
+
+  const handleScanError = useCallback((err: Error) => {
+    setScanError(err.message);
+  }, []);
 
   const submitDraft = async () => {
     const name = (draft.nombre || "").trim();
@@ -233,11 +244,17 @@ export default function Index() {
     setDraft({ cantidad: 1 });
   };
 
-  const generateUserReport = () => {
+  const generateUserReport = useCallback(() => {
     if (reportUser === "all") return;
     const userItems = items.filter(it => it.registrado_nombre === reportUser);
     void generateUserBienesPDF(reportUser, userItems);
-  };
+  }, [reportUser, items]);
+
+  const generateUserExcel = useCallback(() => {
+    if (reportUser === "all") return;
+    const userItems = items.filter(it => it.registrado_nombre === reportUser);
+    downloadBienesCSV(reportUser, userItems);
+  }, [reportUser, items]);
 
   return (
     <div className="space-y-8 pb-12 animate-in fade-in duration-500">
@@ -279,6 +296,15 @@ export default function Index() {
               >
                 <FileText className="w-4 h-4" />
                 PDF
+              </Button>
+              <Button 
+                onClick={generateUserExcel}
+                disabled={reportUser === "all"}
+                size="sm"
+                className="bg-emerald-600/20 text-emerald-400 hover:bg-emerald-600/30 rounded-xl flex items-center gap-2"
+              >
+                <Package className="w-4 h-4" />
+                Excel
               </Button>
             </div>
 
@@ -457,7 +483,7 @@ export default function Index() {
             
             <div className="flex-1 lg:flex-none min-w-[140px] lg:min-w-[180px]">
               <Suspense fallback={<Button disabled className="w-full h-14 rounded-2xl">Cargando QR...</Button>}>
-                <QRScanner onResult={onScan} onError={(e) => setScanError(e.message)} />
+                <QRScanner onResult={onScan} onError={handleScanError} />
               </Suspense>
             </div>
           </div>
