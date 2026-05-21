@@ -22,3 +22,13 @@ const pool = mysql.createPool({
 
 // Se exporta una única instancia para todo el backend.
 export default pool;
+
+// Verificar conexión al inicio (solo en logs)
+pool.getConnection()
+  .then(conn => {
+    console.log(`✅ Conectado a la base de datos MySQL en ${process.env.DB_HOST || 'localhost'}`);
+    conn.release();
+  })
+  .catch(err => {
+    console.error('❌ Error al conectar con la base de datos:', err.message);
+  });

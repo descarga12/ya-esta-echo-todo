@@ -26,7 +26,11 @@ services:
     ports:
       - "3000:3000"
     environment:
-      - DATABASE_URL=mysql://user_inventory:user_password@db:3306/inventory_db
+      - DB_HOST=db
+      - DB_PORT=3306
+      - DB_USER=user_inventory
+      - DB_PASS=user_password
+      - DB_NAME=inventory_db
       - NODE_ENV=production
       - PORT=3000
     depends_on:
