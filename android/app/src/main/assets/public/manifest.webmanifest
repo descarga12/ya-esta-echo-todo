@@ -1,0 +1,1 @@
+{"name":"QR Inventario DSFD","short_name":"QR Inventario","description":"Sistema de Gestión de Inventario con Códigos QR","start_url":"/","display":"standalone","background_color":"#ffffff","theme_color":"#ffffff","lang":"en","scope":"/","icons":[{"src":"logo.png","sizes":"192x192","type":"image/png"},{"src":"logo.png","sizes":"512x512","type":"image/png"}]}
