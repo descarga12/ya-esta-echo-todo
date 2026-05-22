@@ -64,7 +64,8 @@ async function setupDatabase() {
         \`fecha_registro\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         \`fecha_actualizacion\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         INDEX idx_sku (\`sku\`),
-        INDEX idx_nombre (\`nombre\`)
+        INDEX idx_nombre (\`nombre\`),
+        INDEX idx_ubicacion (\`ubicacion\`)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 

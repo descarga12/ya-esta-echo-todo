@@ -3,6 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import { createServer } from "./server";
 import compression from "vite-plugin-compression";
+import { VitePWA } from "vite-plugin-pwa";
 
 /**
  * CONFIGURACIÓN DE VITE
@@ -37,6 +38,9 @@ export default defineConfig(({ mode }) => ({
     cssMinify: true,
     reportCompressedSize: false,
     chunkSizeWarningLimit: 2000,
+    modulePreload: {
+      polyfill: true,
+    },
     
     // Configuración avanzada de Rollup para dividir el código en "chunks"
     rollupOptions: {
@@ -57,6 +61,51 @@ export default defineConfig(({ mode }) => ({
     react(), // Soporte para React con el compilador SWC (muy rápido)
     expressPlugin(), // Integra el servidor backend Express con Vite
     
+    // Configuración PWA para funcionamiento offline
+    VitePWA({
+      registerType: 'autoUpdate',
+      includeAssets: ['favicon.ico', 'logo.png', 'robots.txt'],
+      manifest: {
+        name: 'QR Inventario DSFD',
+        short_name: 'QR Inventario',
+        description: 'Sistema de Gestión de Inventario con Códigos QR',
+        theme_color: '#ffffff',
+        icons: [
+          {
+            src: 'logo.png',
+            sizes: '192x192',
+            type: 'image/png'
+          },
+          {
+            src: 'logo.png',
+            sizes: '512x512',
+            type: 'image/png'
+          }
+        ]
+      },
+      workbox: {
+        // Cachear todos los recursos estáticos
+        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
+        runtimeCaching: [
+          {
+            // Cachear peticiones a la API para lectura offline
+            urlPattern: /^https:\/\/.*\/api\/.*/i,
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'api-cache',
+              expiration: {
+                maxEntries: 100,
+                maxAgeSeconds: 60 * 60 * 24 * 7 // 1 semana
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
+              }
+            }
+          }
+        ]
+      }
+    }),
+
     // Compresión GZIP para archivos web (ahorra ancho de banda)
     compression({
       algorithm: 'gzip',

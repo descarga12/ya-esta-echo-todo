@@ -61,11 +61,33 @@ export function createServer() {
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // Directorio para archivos subidos por el usuario
-  app.use(express.static(path.join(process.cwd(), "public")));
+  // Directorio para archivos subidos por el usuario (con cache de 1 día)
+  app.use(express.static(path.join(process.cwd(), "public"), {
+    maxAge: '1d',
+    immutable: true
+  }));
   
-  // Servir los archivos compilados del frontend (React SPA)
-  app.use(express.static(path.join(process.cwd(), "dist", "spa")));
+  // Servir los archivos compilados del frontend (React SPA) con cache agresivo (1 año)
+  // Vite genera hashes en los nombres de archivos, así que es seguro cachear agresivamente
+  app.use(express.static(path.join(process.cwd(), "dist", "spa"), {
+    maxAge: '1y',
+    immutable: true,
+    index: false // Evita servir index.html con cache largo
+  }));
+
+  // Asegurar que el Service Worker y el Manifest se sirvan sin cache agresivo para actualizaciones rápidas
+  app.get(['/sw.js', '/manifest.webmanifest'], (req, res) => {
+    res.sendFile(path.join(process.cwd(), "dist", "spa", req.path), {
+      maxAge: '0'
+    });
+  });
+
+  // Servir el index.html por separado SIN cache largo para que los usuarios siempre tengan la última versión
+  app.get('/', (req, res) => {
+    res.sendFile(path.join(process.cwd(), "dist", "spa", "index.html"), {
+      maxAge: '0'
+    });
+  });
 
   // Montar las rutas de la API bajo el prefijo /api
   app.use("/api", createApiRouter());
